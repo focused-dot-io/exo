@@ -228,9 +228,16 @@ class P2PShardDownloader(ShardDownloader):
         try:
             temp_dir = Path(tempfile.mkdtemp(prefix="shard_download_"))
             # Create HuggingFace-style directory structure
-            snapshot_dir = temp_dir / "snapshots" / "current"
+            model_name = f"models--{shard.model_id.replace('/', '--')}"
+            model_dir = temp_dir / model_name
+            snapshot_dir = model_dir / "snapshots" / "current"
             snapshot_dir.mkdir(parents=True, exist_ok=True)
             temp_path = snapshot_dir / "model.safetensors"
+            
+            # Create config.json (minimal version)
+            config_path = snapshot_dir / "config.json"
+            with open(config_path, "w") as f:
+                f.write('{"model_type": "llama"}')
             
             if DEBUG >= 2:
                 print(f"[P2P Download] Created temporary directory at {temp_dir}")

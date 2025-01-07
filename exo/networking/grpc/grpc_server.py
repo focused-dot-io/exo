@@ -8,6 +8,8 @@ from . import node_service_pb2_grpc
 from exo import DEBUG
 from exo.inference.shard import Shard
 from exo.orchestration import Node
+from exo.networking.grpc.file_service_pb2_grpc import add_FileServiceServicer_to_server
+from exo.networking.grpc.file_service_handler import FileServiceHandler
 
 
 class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
@@ -16,6 +18,11 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
     self.host = host
     self.port = port
     self.server = None
+    self.node_service = NodeServiceHandler()
+    self.file_service = FileServiceHandler()
+
+    add_NodeServiceServicer_to_server(self.node_service, self.server)
+    add_FileServiceServicer_to_server(self.file_service, self.server)
 
   async def start(self) -> None:
     self.server = grpc.aio.server(

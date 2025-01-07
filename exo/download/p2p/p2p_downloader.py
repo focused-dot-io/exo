@@ -317,9 +317,8 @@ class P2PShardDownloader(ShardDownloader):
                 if DEBUG >= 2:
                     print(f"[P2P Download] Starting transfer stream for shard {shard}")
                 
-                # Initialize stream and send metadata request
+                # Initialize bidirectional stream
                 stream = peer.stub.TransferShard()
-                await stream.write(metadata)
                 
                 if DEBUG >= 2:
                     print(f"[P2P Download] Writing shard {shard} to temporary file {temp_path}")
@@ -342,43 +341,31 @@ class P2PShardDownloader(ShardDownloader):
                 with open(temp_path, "wb") as f:
                     start_time = asyncio.get_event_loop().time()
                     async with asyncio.timeout(TRANSFER_TIMEOUT):
-                        # Read the initial metadata response
-                        initial_response = await stream.read()
+                        # Send initial metadata request
+                        await stream.write(metadata)
+                        await stream.done_writing()
+                        
+                        # Read responses
                         total_size = 0
-                        
-                        if DEBUG >= 2:
-                            print(f"[P2P Download] Got initial response: {initial_response}")
-                        
-                        if isinstance(initial_response, TransferStatus):
-                            if hasattr(initial_response, 'status') and initial_response.status == "ERROR":
-                                error_msg = getattr(initial_response, 'error_message', 'Unknown error')
-                                raise RuntimeError(f"Transfer failed: {error_msg}")
-                            
-                            try:
-                                total_size = getattr(initial_response, 'file_size', 0)
+                        async for response in stream:
+                            if isinstance(response, TransferStatus):
                                 if DEBUG >= 2:
-                                    print(f"[P2P Download] Got initial status with file size: {total_size}")
-                            except Exception as e:
-                                if DEBUG >= 2:
-                                    print(f"[P2P Download] Error getting file size from status: {e}")
-                                total_size = 0
-                        
-                        while True:
-                            chunk = await stream.read()
-                            if not chunk:
-                                if DEBUG >= 2:
-                                    print("[P2P Download] Stream ended")
-                                break
-                                
-                            if not isinstance(chunk, ShardChunk):
-                                if DEBUG >= 2:
-                                    print(f"[P2P Download] Unexpected message type: {type(chunk)}")
+                                    print(f"[P2P Download] Got status: {response}")
+                                if hasattr(response, 'status') and response.status == "ERROR":
+                                    error_msg = getattr(response, 'error_message', 'Unknown error')
+                                    raise RuntimeError(f"Transfer failed: {error_msg}")
+                                total_size = getattr(response, 'file_size', 0)
                                 continue
                                 
-                            chunk_data = getattr(chunk, 'chunk_data', None)
+                            if not isinstance(response, ShardChunk):
+                                if DEBUG >= 2:
+                                    print(f"[P2P Download] Unexpected message type: {type(response)}")
+                                continue
+                                
+                            chunk_data = getattr(response, 'chunk_data', None)
                             if chunk_data:
                                 f.write(chunk_data)
-                                offset = getattr(chunk, 'offset', 0)
+                                offset = getattr(response, 'offset', 0)
                                 bytes_processed = offset + len(chunk_data)
                                 total_bytes = total_size or bytes_processed
                                 
@@ -408,7 +395,7 @@ class P2PShardDownloader(ShardDownloader):
                                     )
                                 )
                             
-                            if getattr(chunk, 'is_last', False):
+                            if getattr(response, 'is_last', False):
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Received last chunk for shard {shard}")
                                 break

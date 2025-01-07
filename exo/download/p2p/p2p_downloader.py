@@ -43,6 +43,15 @@ class P2PShardDownloader(ShardDownloader):
         if DEBUG >= 2:
             print(f"[P2P Download] Checking if peer {peer} has shard {shard}")
         
+        # Map of GRPC channel states
+        GRPC_STATES = {
+            0: "IDLE",
+            1: "CONNECTING",
+            2: "READY",
+            3: "TRANSIENT_FAILURE",
+            4: "SHUTDOWN"
+        }
+        
         # Wait for peer to be ready
         for attempt in range(MAX_RETRIES * 2):  # More retries for initial connection
             try:
@@ -68,10 +77,11 @@ class P2PShardDownloader(ShardDownloader):
                 # Check connection state
                 state = peer.channel._channel.check_connectivity_state(True)
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Peer {peer} connection state: {state} ({grpc.ChannelConnectivity(state).name})")
+                    state_name = GRPC_STATES.get(state, f"UNKNOWN({state})")
+                    print(f"[P2P Download] Peer {peer} connection state: {state} ({state_name})")
 
-                # Allow CONNECTING state since is_connected() returned True
-                if state not in [grpc.ChannelConnectivity.READY, grpc.ChannelConnectivity.IDLE, grpc.ChannelConnectivity.CONNECTING]:
+                # Allow READY (2) and IDLE (0) states
+                if state not in [0, 2]:  # IDLE or READY
                     if DEBUG >= 2:
                         print(f"[P2P Download] Peer {peer} not ready (state={state}), waiting...")
                     if attempt < MAX_RETRIES * 2 - 1:

@@ -153,8 +153,8 @@ class P2PShardDownloader(ShardDownloader):
         if final_path.exists():
             if DEBUG >= 2:
                 print(f"[P2P Download] Shard {shard} already exists at {final_path}")
-            self.completed_downloads[shard] = final_model_dir
-            return final_model_dir
+            self.completed_downloads[shard] = final_path
+            return final_path
         
         if shard in self.completed_downloads:
             if DEBUG >= 2:
@@ -415,10 +415,10 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Successfully moved files to {final_model_dir}")
                 print(f"[P2P Download] Created config.json at {root_config} and {snapshot_config}")
             
-            # Store the directory path in completed_downloads, not the file path
-            self.completed_downloads[shard] = final_model_dir
+            # Store the path to the actual safetensors file
+            self.completed_downloads[shard] = final_path
             
-            return final_model_dir
+            return final_path
             
         except asyncio.TimeoutError as e:
             if DEBUG >= 2:

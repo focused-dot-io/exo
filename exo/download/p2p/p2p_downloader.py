@@ -151,20 +151,33 @@ class P2PShardDownloader(ShardDownloader):
         
         # Check if the complete model structure exists
         def check_model_structure() -> bool:
-            if not all(p.exists() for p in [
-                final_model_dir,
-                final_snapshot_dir,
-                final_safetensors,
-                final_model_dir / "config.json",
-                final_snapshot_dir / "config.json"
-            ]):
-                return False
-            
-            # Verify safetensors is a file, not a directory
-            if not final_safetensors.is_file():
-                return False
+            try:
+                if not all(p.exists() for p in [
+                    final_model_dir,
+                    final_snapshot_dir,
+                    final_safetensors,
+                    final_model_dir / "config.json",
+                    final_snapshot_dir / "config.json"
+                ]):
+                    return False
                 
-            return True
+                # Verify safetensors is a file, not a directory
+                if not final_safetensors.is_file():
+                    return False
+                
+                # Try to read the first few bytes to verify file integrity
+                with open(final_safetensors, 'rb') as f:
+                    header = f.read(8)
+                    if len(header) != 8:
+                        if DEBUG >= 2:
+                            print(f"[P2P Download] File integrity check failed for {final_safetensors}")
+                        return False
+                
+                return True
+            except Exception as e:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Error checking model structure: {e}")
+                return False
         
         # Check if shard already exists locally with complete structure
         if check_model_structure():
@@ -400,10 +413,17 @@ class P2PShardDownloader(ShardDownloader):
                                     print(f"[P2P Download] Received last chunk for shard {shard}")
                                 break
                     
-                    # Verify file size
+                    # Verify file size and integrity
                     actual_size = os.path.getsize(temp_path)
                     if total_size > 0 and actual_size != total_size:
                         raise RuntimeError(f"File size mismatch: expected {total_size}, got {actual_size}")
+                    
+                    # Verify file can be read
+                    with open(temp_path, 'rb') as f:
+                        header = f.read(8)
+                        if len(header) != 8:
+                            raise RuntimeError("File integrity check failed")
+                        f.seek(0, os.SEEK_END)  # Seek to end to ensure entire file is readable
                     
                     # Report completion
                     self._on_progress.trigger_all(shard, RepoProgressEvent(
@@ -446,6 +466,12 @@ class P2PShardDownloader(ShardDownloader):
                 # Verify the moved file
                 if os.path.getsize(final_safetensors) != actual_size:
                     raise RuntimeError("File size changed during move")
+                # Verify file integrity after move
+                with open(final_safetensors, 'rb') as f:
+                    header = f.read(8)
+                    if len(header) != 8:
+                        raise RuntimeError("File integrity check failed after move")
+                    f.seek(0, os.SEEK_END)  # Verify entire file is readable
             except Exception as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Error moving file: {e}")

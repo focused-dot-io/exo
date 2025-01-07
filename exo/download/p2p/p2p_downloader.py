@@ -16,6 +16,12 @@ from exo.networking.grpc.file_service_pb2 import (
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
+CONNECT_TIMEOUT = 10.0  # seconds
+TRANSFER_TIMEOUT = 300.0  # seconds
+
+class PeerConnectionError(Exception):
+    """Raised when a peer connection fails"""
+    pass
 
 class P2PShardDownloader(ShardDownloader):
     def __init__(self, peers: List[PeerHandle], quick_check: bool = False):
@@ -25,28 +31,44 @@ class P2PShardDownloader(ShardDownloader):
         self.completed_downloads: Dict[Shard, Path] = {}
         self._on_progress = AsyncCallbackSystem[str, Tuple[Shard, RepoProgressEvent]]()
         self.current_shard: Optional[Shard] = None
+        self.failed_peers: Set[PeerHandle] = set()
 
     async def _check_peer_status(self, peer: PeerHandle, shard: Shard, inference_engine_name: str) -> Optional[GetShardStatusResponse]:
         """Check peer status with retries"""
+        if peer in self.failed_peers:
+            if DEBUG >= 2:
+                print(f"[P2P Download] Skipping previously failed peer {peer}")
+            return None
+
         for attempt in range(MAX_RETRIES):
             try:
-                status = await peer.file_service.GetShardStatus(
-                    GetShardStatusRequest(
-                        shard=shard.to_proto(),
-                        inference_engine_name=inference_engine_name
+                async with asyncio.timeout(CONNECT_TIMEOUT):
+                    status = await peer.file_service.GetShardStatus(
+                        GetShardStatusRequest(
+                            shard=shard.to_proto(),
+                            inference_engine_name=inference_engine_name
+                        )
                     )
-                )
-                return status
+                    return status
+            except asyncio.TimeoutError:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Timeout checking peer {peer} (attempt {attempt + 1}/{MAX_RETRIES})")
+                if attempt == MAX_RETRIES - 1:
+                    self.failed_peers.add(peer)
             except grpc.aio.AioRpcError as e:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Attempt {attempt + 1}/{MAX_RETRIES} failed for peer {peer}: {e.details()}")
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(RETRY_DELAY * (attempt + 1))
-                continue
+                    print(f"[P2P Download] GRPC error checking peer {peer} (attempt {attempt + 1}/{MAX_RETRIES}): {e.details()}")
+                if attempt == MAX_RETRIES - 1:
+                    self.failed_peers.add(peer)
             except Exception as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Unexpected error checking peer {peer}: {e}")
+                self.failed_peers.add(peer)
                 break
+
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(RETRY_DELAY * (attempt + 1))
+
         return None
 
     async def ensure_shard(self, shard: Shard, inference_engine_name: str) -> Path:
@@ -68,6 +90,9 @@ class P2PShardDownloader(ShardDownloader):
             print(f"[P2P Download] Searching for peers with shard {shard}")
             
         for peer in self.peers:
+            if peer in self.failed_peers:
+                continue
+                
             status = await self._check_peer_status(peer, shard, inference_engine_name)
             if status and status.has_shard:
                 if DEBUG >= 2:
@@ -79,16 +104,18 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] No peers found with shard {shard}")
             raise FileNotFoundError(f"No peers have shard {shard}")
 
-        # Sort peers by response time/reliability (future improvement)
-        chosen_peer, status = available_peers[0]
-        if DEBUG >= 2:
-            print(f"[P2P Download] Selected peer {chosen_peer} to download shard {shard}")
-        
-        # Start download with retries
-        for attempt in range(MAX_RETRIES):
+        # Try each available peer until one succeeds
+        last_error = None
+        for peer, status in available_peers:
+            if peer in self.failed_peers:
+                continue
+                
             try:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Attempting download from peer {peer}")
+                    
                 download_task = asyncio.create_task(
-                    self._download_shard(shard, inference_engine_name, chosen_peer)
+                    self._download_shard(shard, inference_engine_name, peer)
                 )
                 self.active_downloads[shard] = download_task
                 
@@ -98,22 +125,26 @@ class P2PShardDownloader(ShardDownloader):
                     print(f"[P2P Download] Successfully downloaded shard {shard} to {path}")
                 return path
                 
-            except grpc.aio.AioRpcError as e:
+            except (asyncio.TimeoutError, grpc.aio.AioRpcError) as e:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Attempt {attempt + 1}/{MAX_RETRIES} failed: {e.details()}")
-                if attempt < MAX_RETRIES - 1:
-                    await asyncio.sleep(RETRY_DELAY * (attempt + 1))
-                    continue
-                raise  # Re-raise on last attempt
+                    print(f"[P2P Download] Failed to download from peer {peer}: {str(e)}")
+                self.failed_peers.add(peer)
+                last_error = e
+                continue
                 
             except Exception as e:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Unexpected error downloading shard: {e}")
-                raise
+                    print(f"[P2P Download] Unexpected error downloading from peer {peer}: {e}")
+                self.failed_peers.add(peer)
+                last_error = e
+                continue
                 
             finally:
                 if shard in self.active_downloads:
                     self.active_downloads.pop(shard)
+
+        # If we get here, all peers failed
+        raise PeerConnectionError(f"All peers failed to download shard {shard}. Last error: {last_error}")
 
     async def _download_shard(
         self, shard: Shard, inference_engine_name: str, peer: PeerHandle
@@ -132,7 +163,7 @@ class P2PShardDownloader(ShardDownloader):
         
         try:
             # Start transfer stream with timeout
-            async with asyncio.timeout(30):  # 30 second timeout for initial connection
+            async with asyncio.timeout(CONNECT_TIMEOUT):
                 stream = peer.file_service.TransferShard()
                 
                 if DEBUG >= 2:
@@ -150,7 +181,7 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Writing shard {shard} to temporary file {temp_path}")
             
             with open(temp_path, "wb") as f:
-                async with asyncio.timeout(300):  # 5 minute timeout for full transfer
+                async with asyncio.timeout(TRANSFER_TIMEOUT):
                     async for chunk in stream:
                         if chunk.HasField("chunk_data"):
                             f.write(chunk.chunk_data)

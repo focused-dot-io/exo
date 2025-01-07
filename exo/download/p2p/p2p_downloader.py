@@ -233,18 +233,41 @@ class P2PShardDownloader(ShardDownloader):
                 if DEBUG >= 2:
                     print(f"[P2P Download] Writing shard {shard} to temporary file {temp_path}")
                 
+                # Report initial progress
+                self._on_progress.trigger_all(shard, RepoProgressEvent(
+                    status="downloading",
+                    bytes_processed=0,
+                    total_bytes=0,  # Will be updated with first chunk
+                    overall_speed=0,
+                    overall_eta=0
+                ))
+                
                 with open(temp_path, "wb") as f:
+                    start_time = asyncio.get_event_loop().time()
                     async with asyncio.timeout(TRANSFER_TIMEOUT):
                         async for chunk in stream:
                             if chunk.HasField("chunk_data"):
                                 f.write(chunk.chunk_data)
+                                bytes_processed = chunk.offset + len(chunk.chunk_data)
+                                total_bytes = metadata.metadata.total_size or bytes_processed
+                                
                                 if DEBUG >= 3:
                                     print(f"[P2P Download] Received chunk of size {len(chunk.chunk_data)} at offset {chunk.offset}")
+                                
+                                # Calculate speed and ETA
+                                elapsed = asyncio.get_event_loop().time() - start_time
+                                speed = bytes_processed / elapsed if elapsed > 0 else 0
+                                remaining_bytes = total_bytes - bytes_processed
+                                eta = remaining_bytes / speed if speed > 0 else 0
+                                
                                 self._on_progress.trigger_all(
                                     shard,
                                     RepoProgressEvent(
-                                        bytes_processed=chunk.offset + len(chunk.chunk_data),
-                                        total_bytes=metadata.metadata.total_size
+                                        status="downloading",
+                                        bytes_processed=bytes_processed,
+                                        total_bytes=total_bytes,
+                                        overall_speed=speed,
+                                        overall_eta=eta
                                     )
                                 )
                                 
@@ -252,6 +275,15 @@ class P2PShardDownloader(ShardDownloader):
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Received last chunk for shard {shard}")
                                 break
+                    
+                    # Report completion
+                    self._on_progress.trigger_all(shard, RepoProgressEvent(
+                        status="complete",
+                        bytes_processed=metadata.metadata.total_size,
+                        total_bytes=metadata.metadata.total_size,
+                        overall_speed=0,
+                        overall_eta=0
+                    ))
                     
             if DEBUG >= 2:
                 print(f"[P2P Download] Completed download of shard {shard} to {temp_path}")
@@ -262,6 +294,15 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Timeout downloading shard {shard}: {e}")
             if temp_path.exists():
                 temp_path.unlink()
+            # Report failure
+            self._on_progress.trigger_all(shard, RepoProgressEvent(
+                status="failed",
+                bytes_processed=0,
+                total_bytes=0,
+                overall_speed=0,
+                overall_eta=0,
+                error=str(e)
+            ))
             raise
             
         except Exception as e:
@@ -269,6 +310,15 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Error downloading shard {shard}: {e}")
             if temp_path.exists():
                 temp_path.unlink()
+            # Report failure
+            self._on_progress.trigger_all(shard, RepoProgressEvent(
+                status="failed",
+                bytes_processed=0,
+                total_bytes=0,
+                overall_speed=0,
+                overall_eta=0,
+                error=str(e)
+            ))
             raise
 
     @property

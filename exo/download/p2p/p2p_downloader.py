@@ -6,6 +6,7 @@ from datetime import timedelta
 import tempfile
 import shutil
 import grpc
+import os
 from exo.inference.shard import Shard
 from exo.download.shard_download import ShardDownloader
 from exo.download.download_progress import RepoProgressEvent
@@ -226,18 +227,19 @@ class P2PShardDownloader(ShardDownloader):
         # Create a fresh temporary directory
         temp_dir = None
         try:
-            temp_dir = Path(tempfile.mkdtemp(prefix="shard_download_"))
-            # Create HuggingFace-style directory structure
+            # Get HuggingFace cache directory
+            hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
             model_name = f"models--{shard.model_id.replace('/', '--')}"
-            model_dir = temp_dir / model_name
-            snapshot_dir = model_dir / "snapshots" / "current"
-            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            final_model_dir = Path(hf_home) / model_name
             
-            # Create both files at the snapshot directory level
+            # Create temp directory for download
+            temp_dir = Path(tempfile.mkdtemp(prefix="shard_download_"))
+            snapshot_dir = temp_dir / "snapshots" / "current"
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
             temp_path = snapshot_dir / "model.safetensors"
-            config_path = snapshot_dir / "config.json"
             
             # Create config.json (minimal version)
+            config_path = snapshot_dir / "config.json"
             with open(config_path, "w") as f:
                 f.write('{"model_type": "llama", "architectures": ["LlamaForCausalLM"]}')
             
@@ -245,6 +247,7 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Created temporary directory at {temp_dir}")
                 print(f"[P2P Download] Using model path: {temp_path}")
                 print(f"[P2P Download] Created config at: {config_path}")
+                print(f"[P2P Download] Final destination will be: {final_model_dir}")
             
             # Start transfer stream with timeout
             async with asyncio.timeout(CONNECT_TIMEOUT):
@@ -360,7 +363,22 @@ class P2PShardDownloader(ShardDownloader):
                     
             if DEBUG >= 2:
                 print(f"[P2P Download] Completed download of shard {shard} to {temp_path}")
-            return temp_path
+                print(f"[P2P Download] Moving files to HuggingFace cache directory")
+            
+            # Move files to HuggingFace cache
+            final_model_dir.mkdir(parents=True, exist_ok=True)
+            final_snapshot_dir = final_model_dir / "snapshots" / "current"
+            final_snapshot_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Move the files
+            final_path = final_snapshot_dir / "model.safetensors"
+            shutil.move(str(temp_path), str(final_path))
+            shutil.move(str(config_path), str(final_snapshot_dir / "config.json"))
+            
+            if DEBUG >= 2:
+                print(f"[P2P Download] Successfully moved files to {final_model_dir}")
+            
+            return final_path
             
         except asyncio.TimeoutError as e:
             if DEBUG >= 2:

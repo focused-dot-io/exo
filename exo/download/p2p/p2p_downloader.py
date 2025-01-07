@@ -2,6 +2,7 @@ import asyncio
 import traceback
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Set
+from datetime import timedelta
 import grpc
 from exo.inference.shard import Shard
 from exo.download.shard_download import ShardDownloader
@@ -243,7 +244,9 @@ class P2PShardDownloader(ShardDownloader):
                     downloaded_bytes_this_session=0,
                     total_bytes=0,  # Will be updated with first chunk
                     overall_speed=0,
-                    overall_eta=0
+                    overall_eta=timedelta(seconds=0),
+                    file_progress={},
+                    status="downloading"
                 ))
                 
                 with open(temp_path, "wb") as f:
@@ -290,13 +293,15 @@ class P2PShardDownloader(ShardDownloader):
                     self._on_progress.trigger_all(shard, RepoProgressEvent(
                         repo_id=shard.model_id,
                         repo_revision="main",
-                        completed_files=0,
+                        completed_files=1,
                         total_files=1,
                         downloaded_bytes=metadata.metadata.total_size,
                         downloaded_bytes_this_session=metadata.metadata.total_size,
                         total_bytes=metadata.metadata.total_size,
                         overall_speed=0,
-                        overall_eta=0
+                        overall_eta=timedelta(seconds=0),
+                        file_progress={},
+                        status="complete"
                     ))
                     
             if DEBUG >= 2:
@@ -318,8 +323,9 @@ class P2PShardDownloader(ShardDownloader):
                 downloaded_bytes_this_session=0,
                 total_bytes=0,
                 overall_speed=0,
-                overall_eta=0,
-                error=str(e)
+                overall_eta=timedelta(seconds=0),
+                file_progress={},
+                status="failed"
             ))
             raise
             
@@ -338,8 +344,9 @@ class P2PShardDownloader(ShardDownloader):
                 downloaded_bytes_this_session=0,
                 total_bytes=0,
                 overall_speed=0,
-                overall_eta=0,
-                error=str(e)
+                overall_eta=timedelta(seconds=0),
+                file_progress={},
+                status="failed"
             ))
             raise
 

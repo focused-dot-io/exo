@@ -228,8 +228,10 @@ class P2PShardDownloader(ShardDownloader):
             async with asyncio.timeout(CONNECT_TIMEOUT):
                 if DEBUG >= 2:
                     print(f"[P2P Download] Starting transfer stream for shard {shard}")
-                # Send initial metadata request
-                stream = peer.stub.TransferShard(metadata)
+                
+                # Initialize stream and send metadata request
+                stream = peer.stub.TransferShard()
+                await stream.write(metadata)
                 
                 if DEBUG >= 2:
                     print(f"[P2P Download] Writing shard {shard} to temporary file {temp_path}")
@@ -252,11 +254,22 @@ class P2PShardDownloader(ShardDownloader):
                 with open(temp_path, "wb") as f:
                     start_time = asyncio.get_event_loop().time()
                     async with asyncio.timeout(TRANSFER_TIMEOUT):
-                        async for chunk in stream:
+                        # Read the initial metadata response
+                        initial_response = await stream.read()
+                        if initial_response and initial_response.HasField("metadata"):
+                            metadata = initial_response.metadata
+                            if DEBUG >= 2:
+                                print(f"[P2P Download] Got initial metadata: size={metadata.total_size}")
+                        
+                        while True:
+                            chunk = await stream.read()
+                            if not chunk:
+                                break
+                                
                             if chunk.HasField("chunk_data"):
                                 f.write(chunk.chunk_data)
                                 bytes_processed = chunk.offset + len(chunk.chunk_data)
-                                total_bytes = metadata.metadata.total_size or bytes_processed
+                                total_bytes = metadata.total_size or bytes_processed
                                 
                                 if DEBUG >= 3:
                                     print(f"[P2P Download] Received chunk of size {len(chunk.chunk_data)} at offset {chunk.offset}")
@@ -283,7 +296,7 @@ class P2PShardDownloader(ShardDownloader):
                                         status="downloading"
                                     )
                                 )
-                                
+                            
                             if chunk.is_last:
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Received last chunk for shard {shard}")

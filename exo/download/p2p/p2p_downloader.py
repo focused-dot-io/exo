@@ -43,7 +43,7 @@ class P2PShardDownloader(ShardDownloader):
 
         if DEBUG >= 2:
             print(f"[P2P Download] Checking if peer {peer} has shard {shard}")
-            print(f"[P2P Download] Peer details - address: {peer.address}, port: {peer.port}")
+            print(f"[P2P Download] Peer details: {peer}")
         
         # Map of GRPC channel states for debugging
         GRPC_STATES = {
@@ -65,7 +65,7 @@ class P2PShardDownloader(ShardDownloader):
                 
                 if not is_connected:
                     if DEBUG >= 2:
-                        print(f"[P2P Download] Attempting to connect to peer {peer} at {peer.address}:{peer.port} (attempt {attempt + 1})")
+                        print(f"[P2P Download] Attempting to connect to peer {peer} (attempt {attempt + 1})")
                     try:
                         async with asyncio.timeout(CONNECT_TIMEOUT):
                             await peer.connect()

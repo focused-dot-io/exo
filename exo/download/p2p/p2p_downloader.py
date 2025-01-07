@@ -227,12 +227,14 @@ class P2PShardDownloader(ShardDownloader):
         temp_dir = None
         try:
             temp_dir = Path(tempfile.mkdtemp(prefix="shard_download_"))
-            model_dir = temp_dir / "model"
-            model_dir.mkdir(parents=True, exist_ok=True)
-            temp_path = model_dir / "model.safetensors"
+            # Create HuggingFace-style directory structure
+            snapshot_dir = temp_dir / "snapshots" / "current"
+            snapshot_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = snapshot_dir / "model.safetensors"
             
             if DEBUG >= 2:
                 print(f"[P2P Download] Created temporary directory at {temp_dir}")
+                print(f"[P2P Download] Using model path: {temp_path}")
             
             # Start transfer stream with timeout
             async with asyncio.timeout(CONNECT_TIMEOUT):

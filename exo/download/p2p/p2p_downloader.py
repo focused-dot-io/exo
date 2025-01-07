@@ -226,41 +226,32 @@ class P2PShardDownloader(ShardDownloader):
         try:
             # Start transfer stream with timeout
             async with asyncio.timeout(CONNECT_TIMEOUT):
-                stream = peer.stub.TransferShard()
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Starting transfer stream for shard {shard}")
+                stream = peer.stub.TransferShard.__call__(metadata)
                 
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Sending metadata request for shard {shard}")
-                await stream.write(metadata)
+                    print(f"[P2P Download] Writing shard {shard} to temporary file {temp_path}")
                 
-                response = await stream.read()
-                if not response or response.status == TransferStatus.ERROR:
-                    error_msg = f"Failed to start transfer: {response.error_message if response else 'No response'}"
-                    if DEBUG >= 2:
-                        print(f"[P2P Download] {error_msg}")
-                    raise Exception(error_msg)
-            
-            if DEBUG >= 2:
-                print(f"[P2P Download] Writing shard {shard} to temporary file {temp_path}")
-            
-            with open(temp_path, "wb") as f:
-                async with asyncio.timeout(TRANSFER_TIMEOUT):
-                    async for chunk in stream:
-                        if chunk.HasField("chunk_data"):
-                            f.write(chunk.chunk_data)
-                            if DEBUG >= 3:
-                                print(f"[P2P Download] Received chunk of size {len(chunk.chunk_data)} at offset {chunk.offset}")
-                            self._on_progress.trigger_all(
-                                shard,
-                                RepoProgressEvent(
-                                    bytes_processed=chunk.offset + len(chunk.chunk_data),
-                                    total_bytes=metadata.metadata.total_size
+                with open(temp_path, "wb") as f:
+                    async with asyncio.timeout(TRANSFER_TIMEOUT):
+                        async for chunk in stream:
+                            if chunk.HasField("chunk_data"):
+                                f.write(chunk.chunk_data)
+                                if DEBUG >= 3:
+                                    print(f"[P2P Download] Received chunk of size {len(chunk.chunk_data)} at offset {chunk.offset}")
+                                self._on_progress.trigger_all(
+                                    shard,
+                                    RepoProgressEvent(
+                                        bytes_processed=chunk.offset + len(chunk.chunk_data),
+                                        total_bytes=metadata.metadata.total_size
+                                    )
                                 )
-                            )
-                            
-                        if chunk.is_last:
-                            if DEBUG >= 2:
-                                print(f"[P2P Download] Received last chunk for shard {shard}")
-                            break
+                                
+                            if chunk.is_last:
+                                if DEBUG >= 2:
+                                    print(f"[P2P Download] Received last chunk for shard {shard}")
+                                break
                     
             if DEBUG >= 2:
                 print(f"[P2P Download] Completed download of shard {shard} to {temp_path}")

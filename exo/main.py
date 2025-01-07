@@ -202,7 +202,8 @@ async def update_coordinator_peers():
                 if DEBUG >= 2:
                     print(f"[Coordinator] Updating peers: {len(peers)} peers available")
                     for peer in peers:
-                        print(f"[Coordinator] - Peer {peer}, connected={peer.is_connected()}")
+                        is_connected = await peer.is_connected()
+                        print(f"[Coordinator] - Peer {peer}, connected={is_connected}")
                 shard_downloader.p2p_downloader.peers = peers
                 shard_downloader.p2p_downloader.failed_peers.clear()  # Reset failed peers on update
         except Exception as e:

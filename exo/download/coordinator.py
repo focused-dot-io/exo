@@ -48,7 +48,8 @@ class DownloadCoordinator(ShardDownloader):
             if self.p2p_downloader:
                 print(f"[Coordinator] P2P downloader has {len(self.p2p_downloader.peers)} peers:")
                 for peer in self.p2p_downloader.peers:
-                    print(f"[Coordinator] - Peer {peer}, connected={peer.is_connected()}, failed={peer in self.p2p_downloader.failed_peers}")
+                    is_connected = await peer.is_connected()
+                    print(f"[Coordinator] - Peer {peer}, connected={is_connected}, failed={peer in self.p2p_downloader.failed_peers}")
 
         if not self.disable_local_download:
             try:

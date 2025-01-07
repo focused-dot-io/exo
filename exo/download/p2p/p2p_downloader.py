@@ -42,11 +42,12 @@ class P2PShardDownloader(ShardDownloader):
 
         if DEBUG >= 2:
             print(f"[P2P Download] Checking if peer {peer} has shard {shard}")
-
+        
         # Wait for peer to be ready
         for attempt in range(MAX_RETRIES * 2):  # More retries for initial connection
             try:
-                if not peer.is_connected():
+                is_connected = await peer.is_connected()
+                if not is_connected:
                     if DEBUG >= 2:
                         print(f"[P2P Download] Peer {peer} not connected, attempting to connect (attempt {attempt + 1})")
                     try:
@@ -62,7 +63,7 @@ class P2PShardDownloader(ShardDownloader):
                         return None
 
                 # Check connection state
-                state = peer.channel._channel.check_connectivity_state(True)
+                state = await peer.get_connection_state()
                 if DEBUG >= 2:
                     print(f"[P2P Download] Peer {peer} connection state: {state}")
 
@@ -137,7 +138,7 @@ class P2PShardDownloader(ShardDownloader):
                 continue
                 
             status = await self._check_peer_status(peer, shard, inference_engine_name)
-            if status and status.has_shard:
+            if status:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Peer {peer} has shard {shard} at {status.local_path} (size: {status.file_size})")
                 available_peers.append((peer, status))

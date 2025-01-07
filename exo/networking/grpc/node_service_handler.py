@@ -4,6 +4,13 @@ from exo.orchestration import Node
 from exo import DEBUG
 from . import node_service_pb2
 from . import node_service_pb2_grpc
+import asyncio
+from pathlib import Path
+from typing import Optional, AsyncIterator
+from exo.download.hf.hf_helpers import get_local_snapshot_dir, get_weight_map, get_allow_patterns
+from exo.models import get_repo
+
+CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
 class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
     def __init__(self, node: Node):
@@ -103,3 +110,171 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
 
     async def HealthCheck(self, request, context):
         return node_service_pb2.HealthCheckResponse(is_healthy=True) 
+
+    async def GetShardStatus(
+        self,
+        request: node_service_pb2.GetShardStatusRequest,
+        context
+    ) -> node_service_pb2.GetShardStatusResponse:
+        try:
+            shard = Shard(
+                model_id=request.shard.model_id,
+                start_layer=request.shard.start_layer,
+                end_layer=request.shard.end_layer,
+                n_layers=request.shard.n_layers,
+            )
+            repo_name = get_repo(shard.model_id, request.inference_engine_name)
+            
+            if DEBUG >= 2:
+                print(f"[Node Service] Checking if we have shard {shard} from repo {repo_name}")
+            
+            # Check if we have the shard locally
+            snapshot_dir = await get_local_snapshot_dir(repo_name)
+            if not snapshot_dir:
+                if DEBUG >= 2:
+                    print(f"[Node Service] No snapshot directory found for {repo_name}")
+                return node_service_pb2.GetShardStatusResponse(has_shard=False)
+
+            # Get weight map to find shard files
+            weight_map = await get_weight_map(repo_name)
+            if not weight_map:
+                if DEBUG >= 2:
+                    print(f"[Node Service] No weight map found for {repo_name}")
+                return node_service_pb2.GetShardStatusResponse(has_shard=False)
+
+            # Get patterns for this shard
+            allow_patterns = get_allow_patterns(weight_map, shard)
+            if not allow_patterns:
+                if DEBUG >= 2:
+                    print(f"[Node Service] No patterns found for shard {shard}")
+                return node_service_pb2.GetShardStatusResponse(has_shard=False)
+
+            # Find the main model file
+            model_file = snapshot_dir / "model.safetensors"
+            if not model_file.exists():
+                if DEBUG >= 2:
+                    print(f"[Node Service] Model file not found at {model_file}")
+                return node_service_pb2.GetShardStatusResponse(has_shard=False)
+
+            if DEBUG >= 2:
+                print(f"[Node Service] Found shard {shard} at {model_file}")
+                
+            return node_service_pb2.GetShardStatusResponse(
+                has_shard=True,
+                local_path=str(model_file),
+                file_size=model_file.stat().st_size
+            )
+            
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"[Node Service] Error in GetShardStatus: {e}")
+            return node_service_pb2.GetShardStatusResponse(has_shard=False)
+
+    async def TransferShard(
+        self,
+        request_iterator: AsyncIterator[node_service_pb2.ShardChunk],
+        context
+    ) -> AsyncIterator[node_service_pb2.TransferStatus]:
+        try:
+            # Get initial metadata request
+            request = await request_iterator.__anext__()
+            if not request.HasField("metadata"):
+                yield node_service_pb2.TransferStatus(
+                    status=node_service_pb2.TransferStatus.ERROR,
+                    error_message="First message must contain metadata"
+                )
+                return
+                
+            metadata = request.metadata
+            shard = Shard(
+                model_id=metadata.shard.model_id,
+                start_layer=metadata.shard.start_layer,
+                end_layer=metadata.shard.end_layer,
+                n_layers=metadata.shard.n_layers,
+            )
+            repo_name = get_repo(shard.model_id, metadata.inference_engine_name)
+            
+            if DEBUG >= 2:
+                print(f"[Node Service] Starting transfer of shard {shard}")
+            
+            # Find shard file
+            snapshot_dir = await get_local_snapshot_dir(repo_name)
+            if not snapshot_dir:
+                if DEBUG >= 2:
+                    print(f"[Node Service] No snapshot directory found for {repo_name}")
+                yield node_service_pb2.TransferStatus(
+                    status=node_service_pb2.TransferStatus.ERROR,
+                    error_message="Shard not found locally"
+                )
+                return
+
+            # Get the model file
+            model_file = snapshot_dir / "model.safetensors"
+            if not model_file.exists():
+                if DEBUG >= 2:
+                    print(f"[Node Service] Model file not found at {model_file}")
+                yield node_service_pb2.TransferStatus(
+                    status=node_service_pb2.TransferStatus.ERROR,
+                    error_message=f"Model file not found at {model_file}"
+                )
+                return
+                
+            file_size = model_file.stat().st_size
+            bytes_sent = 0
+            
+            if DEBUG >= 2:
+                print(f"[Node Service] Starting transfer of {model_file} (size: {file_size})")
+            
+            # Send initial response with file info
+            yield node_service_pb2.TransferStatus(
+                status=node_service_pb2.TransferStatus.OK,
+                bytes_received=0
+            )
+            
+            # Send file in chunks
+            with open(model_file, "rb") as f:
+                while True:
+                    chunk = f.read(CHUNK_SIZE)
+                    if not chunk:
+                        break
+                        
+                    chunk_data = node_service_pb2.ShardChunk(
+                        chunk_data=chunk,
+                        offset=bytes_sent,
+                        is_last=False
+                    )
+                    await request_iterator.asend(chunk_data)
+                    
+                    bytes_sent += len(chunk)
+                    if DEBUG >= 3:
+                        print(f"[Node Service] Sent chunk of size {len(chunk)} at offset {bytes_sent}")
+                    
+                    yield node_service_pb2.TransferStatus(
+                        status=node_service_pb2.TransferStatus.OK,
+                        bytes_received=bytes_sent
+                    )
+                    
+                    await asyncio.sleep(0)  # Yield control
+            
+            # Send final chunk
+            await request_iterator.asend(node_service_pb2.ShardChunk(
+                chunk_data=b"",
+                offset=bytes_sent,
+                is_last=True
+            ))
+                    
+            # Send final status
+            if DEBUG >= 2:
+                print(f"[Node Service] Completed transfer of shard {shard}")
+            yield node_service_pb2.TransferStatus(
+                status=node_service_pb2.TransferStatus.OK,
+                bytes_received=file_size
+            )
+            
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"[Node Service] Error in TransferShard: {e}")
+            yield node_service_pb2.TransferStatus(
+                status=node_service_pb2.TransferStatus.ERROR,
+                error_message=str(e)
+            ) 

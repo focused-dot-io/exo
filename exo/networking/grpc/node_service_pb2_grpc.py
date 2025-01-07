@@ -74,6 +74,16 @@ class NodeServiceStub(object):
                 request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
+        self.GetShardStatus = channel.unary_unary(
+                '/node_service.NodeService/GetShardStatus',
+                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusRequest.SerializeToString,
+                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusResponse.FromString,
+                _registered_method=True)
+        self.TransferShard = channel.stream_stream(
+                '/node_service.NodeService/TransferShard',
+                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.SerializeToString,
+                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.FromString,
+                _registered_method=True)
 
 
 class NodeServiceServicer(object):
@@ -127,6 +137,18 @@ class NodeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetShardStatus(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def TransferShard(self, request_iterator, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_NodeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -169,6 +191,16 @@ def add_NodeServiceServicer_to_server(servicer, server):
                     servicer.HealthCheck,
                     request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.FromString,
                     response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.SerializeToString,
+            ),
+            'GetShardStatus': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetShardStatus,
+                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusRequest.FromString,
+                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusResponse.SerializeToString,
+            ),
+            'TransferShard': grpc.stream_stream_rpc_method_handler(
+                    servicer.TransferShard,
+                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.FromString,
+                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -387,6 +419,60 @@ class NodeService(object):
             '/node_service.NodeService/HealthCheck',
             exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.SerializeToString,
             exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetShardStatus(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/node_service.NodeService/GetShardStatus',
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusRequest.SerializeToString,
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def TransferShard(request_iterator,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.stream_stream(
+            request_iterator,
+            target,
+            '/node_service.NodeService/TransferShard',
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.SerializeToString,
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.FromString,
             options,
             channel_credentials,
             insecure,

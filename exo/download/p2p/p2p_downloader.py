@@ -8,7 +8,7 @@ from exo.download.shard_download import ShardDownloader
 from exo.download.download_progress import RepoProgressEvent
 from exo.helpers import AsyncCallbackSystem, DEBUG
 from exo.networking.peer_handle import PeerHandle
-from exo.networking.grpc.file_service_pb2 import (
+from exo.networking.grpc.node_service_pb2 import (
     GetShardStatusRequest, GetShardStatusResponse,
     ShardChunk, TransferStatus
 )
@@ -77,7 +77,7 @@ class P2PShardDownloader(ShardDownloader):
 
                 # Try to get shard status
                 async with asyncio.timeout(CONNECT_TIMEOUT):
-                    status = await peer.file_service.GetShardStatus(
+                    status = await peer.stub.GetShardStatus(
                         GetShardStatusRequest(
                             shard=shard.to_proto(),
                             inference_engine_name=inference_engine_name
@@ -195,11 +195,13 @@ class P2PShardDownloader(ShardDownloader):
         if DEBUG >= 2:
             print(f"[P2P Download] Starting download of shard {shard} from peer {peer}")
             
-        metadata = ShardChunk.Metadata(
-            shard=shard.to_proto(),
-            inference_engine_name=inference_engine_name,
-            total_size=0,
-            file_name=""
+        metadata = ShardChunk(
+            metadata=ShardChunk.Metadata(
+                shard=shard.to_proto(),
+                inference_engine_name=inference_engine_name,
+                total_size=0,
+                file_name=""
+            )
         )
         
         temp_path = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
@@ -207,13 +209,13 @@ class P2PShardDownloader(ShardDownloader):
         try:
             # Start transfer stream with timeout
             async with asyncio.timeout(CONNECT_TIMEOUT):
-                stream = peer.file_service.TransferShard()
+                stream = peer.stub.TransferShard()
                 
                 if DEBUG >= 2:
                     print(f"[P2P Download] Sending metadata request for shard {shard}")
-                await stream.send(ShardChunk(metadata=metadata))
+                await stream.write(metadata)
                 
-                response = await stream.recv()
+                response = await stream.read()
                 if not response or response.status == TransferStatus.ERROR:
                     error_msg = f"Failed to start transfer: {response.error_message if response else 'No response'}"
                     if DEBUG >= 2:
@@ -234,7 +236,7 @@ class P2PShardDownloader(ShardDownloader):
                                 shard,
                                 RepoProgressEvent(
                                     bytes_processed=chunk.offset + len(chunk.chunk_data),
-                                    total_bytes=metadata.total_size
+                                    total_bytes=metadata.metadata.total_size
                                 )
                             )
                             

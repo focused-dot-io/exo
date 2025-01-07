@@ -235,8 +235,12 @@ class P2PShardDownloader(ShardDownloader):
                 
                 # Report initial progress
                 self._on_progress.trigger_all(shard, RepoProgressEvent(
-                    status="downloading",
+                    repo_id=shard.model_id,
+                    repo_revision="main",
+                    completed_files=0,
+                    total_files=1,
                     downloaded_bytes=0,
+                    downloaded_bytes_this_session=0,
                     total_bytes=0,  # Will be updated with first chunk
                     overall_speed=0,
                     overall_eta=0
@@ -263,11 +267,17 @@ class P2PShardDownloader(ShardDownloader):
                                 self._on_progress.trigger_all(
                                     shard,
                                     RepoProgressEvent(
-                                        status="downloading",
-                                        bytes_processed=bytes_processed,
+                                        repo_id=shard.model_id,
+                                        repo_revision="main",
+                                        completed_files=0,
+                                        total_files=1,
+                                        downloaded_bytes=bytes_processed,
+                                        downloaded_bytes_this_session=bytes_processed,
                                         total_bytes=total_bytes,
                                         overall_speed=speed,
-                                        overall_eta=eta
+                                        overall_eta=timedelta(seconds=eta),
+                                        file_progress={},
+                                        status="downloading"
                                     )
                                 )
                                 
@@ -278,8 +288,12 @@ class P2PShardDownloader(ShardDownloader):
                     
                     # Report completion
                     self._on_progress.trigger_all(shard, RepoProgressEvent(
-                        status="complete",
-                        bytes_processed=metadata.metadata.total_size,
+                        repo_id=shard.model_id,
+                        repo_revision="main",
+                        completed_files=0,
+                        total_files=1,
+                        downloaded_bytes=metadata.metadata.total_size,
+                        downloaded_bytes_this_session=metadata.metadata.total_size,
                         total_bytes=metadata.metadata.total_size,
                         overall_speed=0,
                         overall_eta=0
@@ -296,8 +310,12 @@ class P2PShardDownloader(ShardDownloader):
                 temp_path.unlink()
             # Report failure
             self._on_progress.trigger_all(shard, RepoProgressEvent(
-                status="failed",
-                bytes_processed=0,
+                repo_id=shard.model_id,
+                repo_revision="main",
+                completed_files=0,
+                total_files=1,
+                downloaded_bytes=0,
+                downloaded_bytes_this_session=0,
                 total_bytes=0,
                 overall_speed=0,
                 overall_eta=0,
@@ -312,8 +330,12 @@ class P2PShardDownloader(ShardDownloader):
                 temp_path.unlink()
             # Report failure
             self._on_progress.trigger_all(shard, RepoProgressEvent(
-                status="failed",
-                bytes_processed=0,
+                repo_id=shard.model_id,
+                repo_revision="main",
+                completed_files=0,
+                total_files=1,
+                downloaded_bytes=0,
+                downloaded_bytes_this_session=0,
                 total_bytes=0,
                 overall_speed=0,
                 overall_eta=0,

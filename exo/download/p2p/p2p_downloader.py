@@ -47,6 +47,9 @@ class P2PShardDownloader(ShardDownloader):
         for attempt in range(MAX_RETRIES * 2):  # More retries for initial connection
             try:
                 is_connected = await peer.is_connected()
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Peer {peer} is_connected={is_connected}")
+                
                 if not is_connected:
                     if DEBUG >= 2:
                         print(f"[P2P Download] Peer {peer} not connected, attempting to connect (attempt {attempt + 1})")
@@ -65,9 +68,10 @@ class P2PShardDownloader(ShardDownloader):
                 # Check connection state
                 state = peer.channel._channel.check_connectivity_state(True)
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Peer {peer} connection state: {state}")
+                    print(f"[P2P Download] Peer {peer} connection state: {state} ({grpc.ChannelConnectivity(state).name})")
 
-                if state not in [grpc.ChannelConnectivity.READY, grpc.ChannelConnectivity.IDLE]:
+                # Allow CONNECTING state since is_connected() returned True
+                if state not in [grpc.ChannelConnectivity.READY, grpc.ChannelConnectivity.IDLE, grpc.ChannelConnectivity.CONNECTING]:
                     if DEBUG >= 2:
                         print(f"[P2P Download] Peer {peer} not ready (state={state}), waiting...")
                     if attempt < MAX_RETRIES * 2 - 1:
@@ -78,6 +82,8 @@ class P2PShardDownloader(ShardDownloader):
 
                 # Try to get shard status
                 async with asyncio.timeout(CONNECT_TIMEOUT):
+                    if DEBUG >= 2:
+                        print(f"[P2P Download] Requesting shard status from peer {peer}")
                     status = await peer.stub.GetShardStatus(
                         GetShardStatusRequest(
                             shard=shard.to_proto(),

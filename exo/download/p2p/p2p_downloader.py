@@ -3,6 +3,8 @@ import traceback
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional, Set
 from datetime import timedelta
+import tempfile
+import shutil
 import grpc
 from exo.inference.shard import Shard
 from exo.download.shard_download import ShardDownloader
@@ -221,32 +223,17 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Error creating metadata: {e}")
             raise
         
-        # Create a directory for the shard
-        base_dir = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
-        model_dir = base_dir / "model"
-        temp_path = model_dir / "model.safetensors"
-        
-        # Clean up existing files if they exist
+        # Create a fresh temporary directory
+        temp_dir = None
         try:
-            if base_dir.exists():
-                if base_dir.is_file():
-                    base_dir.unlink()  # If it's a file, delete it
-                else:
-                    # If it's a directory, clean it up recursively
-                    for item in base_dir.rglob("*"):
-                        if item.is_file():
-                            item.unlink()
-                        elif item.is_dir():
-                            item.rmdir()
-                    base_dir.rmdir()
-        except Exception as e:
+            temp_dir = Path(tempfile.mkdtemp(prefix="shard_download_"))
+            model_dir = temp_dir / "model"
+            model_dir.mkdir(parents=True, exist_ok=True)
+            temp_path = model_dir / "model.safetensors"
+            
             if DEBUG >= 2:
-                print(f"[P2P Download] Error during cleanup: {e}")
-        
-        # Create fresh directories
-        model_dir.mkdir(parents=True, exist_ok=True)
-        
-        try:
+                print(f"[P2P Download] Created temporary directory at {temp_dir}")
+            
             # Start transfer stream with timeout
             async with asyncio.timeout(CONNECT_TIMEOUT):
                 if DEBUG >= 2:
@@ -366,8 +353,8 @@ class P2PShardDownloader(ShardDownloader):
         except asyncio.TimeoutError as e:
             if DEBUG >= 2:
                 print(f"[P2P Download] Timeout downloading shard {shard}: {e}")
-            if temp_path.exists():
-                temp_path.unlink()
+            if temp_dir and temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
             # Report failure
             self._on_progress.trigger_all(shard, RepoProgressEvent(
                 repo_id=shard.model_id,
@@ -387,8 +374,8 @@ class P2PShardDownloader(ShardDownloader):
         except Exception as e:
             if DEBUG >= 2:
                 print(f"[P2P Download] Error downloading shard {shard}: {e}")
-            if temp_path.exists():
-                temp_path.unlink()
+            if temp_dir and temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
             # Report failure
             self._on_progress.trigger_all(shard, RepoProgressEvent(
                 repo_id=shard.model_id,

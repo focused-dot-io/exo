@@ -226,10 +226,18 @@ class P2PShardDownloader(ShardDownloader):
         temp_path = temp_dir / "model.safetensors"
         
         # Clean up existing files if they exist
-        if temp_path.exists():
-            temp_path.unlink()
-        if temp_dir.exists():
-            temp_dir.rmdir()
+        try:
+            if temp_dir.exists():
+                if temp_dir.is_file():
+                    temp_dir.unlink()  # If it's a file, delete it
+                else:
+                    # If it's a directory, clean it up
+                    for file in temp_dir.glob("*"):
+                        file.unlink()
+                    temp_dir.rmdir()
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"[P2P Download] Error during cleanup: {e}")
         
         # Create fresh directory
         temp_dir.mkdir(parents=True, exist_ok=True)

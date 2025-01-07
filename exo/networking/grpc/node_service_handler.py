@@ -8,7 +8,11 @@ import asyncio
 from pathlib import Path
 from typing import Optional, AsyncIterator
 from exo.download.hf.hf_helpers import get_local_snapshot_dir, get_weight_map, get_allow_patterns
-from exo.models import get_repo
+from exo.models import get_repo, get_shard_path
+import traceback
+from typing import Dict, List, Optional, Tuple
+import grpc
+import grpc.aio
 
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 
@@ -117,66 +121,42 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
         context
     ) -> node_service_pb2.GetShardStatusResponse:
         try:
-            shard = Shard(
-                model_id=request.shard.model_id,
-                start_layer=request.shard.start_layer,
-                end_layer=request.shard.end_layer,
-                n_layers=request.shard.n_layers,
-            )
-            repo_name = get_repo(shard.model_id, request.inference_engine_name)
-            
             if DEBUG >= 2:
-                print(f"[Node Service] Checking if we have shard {shard} from repo {repo_name}")
-                print(f"[Node Service] Node ID: {self.node.node_id}")
-            
+                print(f"[Node Service] Checking if we have shard {Shard.from_proto(request.shard)} from repo")
+                print(f"[Node Service] Node ID: {self.node.id}")
+
             # Check if we have the shard locally
-            snapshot_dir = await get_local_snapshot_dir(repo_name)
-            if not snapshot_dir:
-                if DEBUG >= 2:
-                    print(f"[Node Service] No snapshot directory found for {repo_name}")
-                    print(f"[Node Service] Looked in: {snapshot_dir}")
-                return node_service_pb2.GetShardStatusResponse(has_shard=False)
+            shard = Shard.from_proto(request.shard)
+            repo = get_repo(shard.model_id, request.inference_engine_name)
+            local_path = await get_shard_path(repo, shard)
 
-            # Get weight map to find shard files
-            weight_map = await get_weight_map(repo_name)
-            if not weight_map:
+            if local_path and local_path.exists():
                 if DEBUG >= 2:
-                    print(f"[Node Service] No weight map found for {repo_name}")
-                return node_service_pb2.GetShardStatusResponse(has_shard=False)
-
-            # Get patterns for this shard
-            allow_patterns = get_allow_patterns(weight_map, shard)
-            if not allow_patterns:
+                    print(f"[Node Service] Found shard at {local_path}")
+                return node_service_pb2.GetShardStatusResponse(
+                    has_shard=True,
+                    local_path=str(local_path),
+                    file_size=local_path.stat().st_size
+                )
+            else:
                 if DEBUG >= 2:
-                    print(f"[Node Service] No patterns found for shard {shard}")
-                    print(f"[Node Service] Weight map: {weight_map}")
-                return node_service_pb2.GetShardStatusResponse(has_shard=False)
+                    print(f"[Node Service] Shard not found at {local_path}")
+                return node_service_pb2.GetShardStatusResponse(
+                    has_shard=False,
+                    local_path="",
+                    file_size=0
+                )
 
-            # Find the main model file
-            model_file = snapshot_dir / "model.safetensors"
-            if not model_file.exists():
-                if DEBUG >= 2:
-                    print(f"[Node Service] Model file not found at {model_file}")
-                    print(f"[Node Service] Snapshot directory contents: {list(snapshot_dir.iterdir())}")
-                return node_service_pb2.GetShardStatusResponse(has_shard=False)
-
-            if DEBUG >= 2:
-                print(f"[Node Service] Found shard {shard} at {model_file}")
-                print(f"[Node Service] File size: {model_file.stat().st_size}")
-                
-            return node_service_pb2.GetShardStatusResponse(
-                has_shard=True,
-                local_path=str(model_file),
-                file_size=model_file.stat().st_size
-            )
-            
         except Exception as e:
             if DEBUG >= 2:
-                print(f"[Node Service] Error in GetShardStatus: {e}")
+                print(f"[Node Service] Error in GetShardStatus: {str(e)}")
                 print(f"[Node Service] Error type: {type(e)}")
-                import traceback
                 traceback.print_exc()
-            return node_service_pb2.GetShardStatusResponse(has_shard=False)
+            return node_service_pb2.GetShardStatusResponse(
+                has_shard=False,
+                local_path="",
+                file_size=0
+            )
 
     async def TransferShard(
         self,

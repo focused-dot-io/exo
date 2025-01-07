@@ -1,5 +1,7 @@
 from exo.inference.shard import Shard
 from typing import Optional, List
+from pathlib import Path
+from exo.download.hf.hf_helpers import get_local_snapshot_dir
 
 model_cards = {
   ### llama
@@ -184,3 +186,10 @@ def get_supported_models(supported_inference_engine_lists: List[List[str]]) -> L
     model_id for model_id, model_info in model_cards.items()
     if supports_all_engine_lists(model_info)
   ]
+
+async def get_shard_path(repo_name: str, shard: Shard) -> Path:
+    """Get the path to a shard file in a repo"""
+    snapshot_dir = await get_local_snapshot_dir(repo_name)
+    if not snapshot_dir:
+        return None
+    return snapshot_dir / "model.safetensors"

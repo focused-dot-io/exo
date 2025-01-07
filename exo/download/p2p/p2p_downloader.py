@@ -232,16 +232,19 @@ class P2PShardDownloader(ShardDownloader):
             model_dir = temp_dir / model_name
             snapshot_dir = model_dir / "snapshots" / "current"
             snapshot_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create both files at the snapshot directory level
             temp_path = snapshot_dir / "model.safetensors"
+            config_path = snapshot_dir / "config.json"
             
             # Create config.json (minimal version)
-            config_path = snapshot_dir / "config.json"
             with open(config_path, "w") as f:
-                f.write('{"model_type": "llama"}')
+                f.write('{"model_type": "llama", "architectures": ["LlamaForCausalLM"]}')
             
             if DEBUG >= 2:
                 print(f"[P2P Download] Created temporary directory at {temp_dir}")
                 print(f"[P2P Download] Using model path: {temp_path}")
+                print(f"[P2P Download] Created config at: {config_path}")
             
             # Start transfer stream with timeout
             async with asyncio.timeout(CONNECT_TIMEOUT):

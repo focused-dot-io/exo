@@ -40,16 +40,41 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Skipping previously failed peer {peer}")
             return None
 
+        if DEBUG >= 2:
+            print(f"[P2P Download] Checking if peer {peer} has shard {shard}")
+            print(f"[P2P Download] Peer connection state: {peer.channel._channel.check_connectivity_state(True)}")
+
         for attempt in range(MAX_RETRIES):
             try:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Attempt {attempt + 1}/{MAX_RETRIES} to check peer {peer}")
+                    
                 async with asyncio.timeout(CONNECT_TIMEOUT):
+                    # Ensure peer is connected
+                    if not peer.is_connected():
+                        if DEBUG >= 2:
+                            print(f"[P2P Download] Peer {peer} not connected, attempting to connect")
+                        try:
+                            await peer.connect()
+                        except Exception as e:
+                            if DEBUG >= 2:
+                                print(f"[P2P Download] Failed to connect to peer {peer}: {e}")
+                            raise
+                            
                     status = await peer.file_service.GetShardStatus(
                         GetShardStatusRequest(
                             shard=shard.to_proto(),
                             inference_engine_name=inference_engine_name
                         )
                     )
+                    
+                    if DEBUG >= 2:
+                        print(f"[P2P Download] Got status from peer {peer}: has_shard={status.has_shard}")
+                        if status.has_shard:
+                            print(f"[P2P Download] Shard location: {status.local_path}, size: {status.file_size}")
+                            
                     return status
+                    
             except asyncio.TimeoutError:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Timeout checking peer {peer} (attempt {attempt + 1}/{MAX_RETRIES})")
@@ -58,11 +83,13 @@ class P2PShardDownloader(ShardDownloader):
             except grpc.aio.AioRpcError as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] GRPC error checking peer {peer} (attempt {attempt + 1}/{MAX_RETRIES}): {e.details()}")
+                    print(f"[P2P Download] GRPC error code: {e.code()}")
                 if attempt == MAX_RETRIES - 1:
                     self.failed_peers.add(peer)
             except Exception as e:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Unexpected error checking peer {peer}: {e}")
+                    print(f"[P2P Download] Unexpected error checking peer {peer}: {str(e)}")
+                    print(f"[P2P Download] Error type: {type(e)}")
                 self.failed_peers.add(peer)
                 break
 

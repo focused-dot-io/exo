@@ -30,12 +30,14 @@ class DownloadCoordinator(ShardDownloader):
         
         # Forward progress events from both downloaders
         if self.p2p_downloader:
-            self.p2p_downloader.on_progress.add_callback(
-                "coordinator",
+            self.p2p_downloader.on_progress.register(
+                "coordinator"
+            ).on_next(
                 lambda shard, event: self._on_progress.trigger_all(shard, event)
             )
-        self.hf_downloader.on_progress.add_callback(
-            "coordinator",
+        self.hf_downloader.on_progress.register(
+            "coordinator"
+        ).on_next(
             lambda shard, event: self._on_progress.trigger_all(shard, event)
         )
 

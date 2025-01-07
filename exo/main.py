@@ -26,6 +26,7 @@ from exo.topology.ring_memory_weighted_partitioning_strategy import RingMemoryWe
 from exo.api import ChatGPTAPI
 from exo.download.shard_download import ShardDownloader, RepoProgressEvent, NoopShardDownloader
 from exo.download.hf.hf_shard_download import HFShardDownloader
+from exo.download.coordinator import DownloadCoordinator
 from exo.helpers import print_yellow_exo, find_available_port, DEBUG, get_system_info, get_or_create_node_id, get_all_ip_addresses_and_interfaces, terminal_link, shutdown
 from exo.inference.shard import Shard
 from exo.inference.inference_engine import get_inference_engine, InferenceEngine
@@ -78,8 +79,14 @@ print_yellow_exo()
 system_info = get_system_info()
 print(f"Detected system: {system_info}")
 
-shard_downloader: ShardDownloader = HFShardDownloader(quick_check=args.download_quick_check,
-                                                      max_parallel_downloads=args.max_parallel_downloads) if args.inference_engine != "dummy" else NoopShardDownloader()
+shard_downloader: ShardDownloader = (
+    DownloadCoordinator(
+        peers=[],  # Will be populated when peers are discovered
+        disable_local_download=False,
+        quick_check=args.download_quick_check,
+        max_parallel_downloads=args.max_parallel_downloads
+    ) if args.inference_engine != "dummy" else NoopShardDownloader()
+)
 inference_engine_name = args.inference_engine or ("mlx" if system_info == "Apple Silicon Mac" else "tinygrad")
 print(f"Inference engine name after selection: {inference_engine_name}")
 
@@ -186,6 +193,23 @@ def throttled_broadcast(shard: Shard, event: RepoProgressEvent):
 
 shard_downloader.on_progress.register("broadcast").on_next(throttled_broadcast)
 
+# Update coordinator peers when peers are discovered
+async def update_coordinator_peers():
+    while True:
+        try:
+            if isinstance(shard_downloader, DownloadCoordinator):
+                peers = node.peers
+                if DEBUG >= 2:
+                    print(f"[Coordinator] Updating peers: {len(peers)} peers available")
+                    for peer in peers:
+                        print(f"[Coordinator] - Peer {peer}, connected={peer.is_connected()}")
+                shard_downloader.p2p_downloader.peers = peers
+                shard_downloader.p2p_downloader.failed_peers.clear()  # Reset failed peers on update
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"[Coordinator] Error updating peers: {e}")
+        await asyncio.sleep(5)  # Update every 5 seconds
+
 async def run_model_cli(node: Node, inference_engine: InferenceEngine, model_name: str, prompt: str):
   inference_class = inference_engine.__class__.__name__
   shard = build_base_shard(model_name, inference_class)
@@ -272,74 +296,78 @@ async def train_model_cli(node: Node, inference_engine: InferenceEngine, model_n
 
   
 async def main():
-  loop = asyncio.get_running_loop()
+    loop = asyncio.get_running_loop()
 
-  # Check HuggingFace directory permissions
-  hf_home, has_read, has_write = get_hf_home(), await has_hf_home_read_access(), await has_hf_home_write_access()
-  if DEBUG >= 1: print(f"Model storage directory: {hf_home}")
-  print(f"{has_read=}, {has_write=}")
-  if not has_read or not has_write:
-    print(f"""
-          WARNING: Limited permissions for model storage directory: {hf_home}.
-          This may prevent model downloads from working correctly.
-          {"❌ No read access" if not has_read else ""}
-          {"❌ No write access" if not has_write else ""}
-          """)
+    # Check HuggingFace directory permissions
+    hf_home, has_read, has_write = get_hf_home(), await has_hf_home_read_access(), await has_hf_home_write_access()
+    if DEBUG >= 1: print(f"Model storage directory: {hf_home}")
+    print(f"{has_read=}, {has_write=}")
     
-  if not args.models_seed_dir is None:
-    try:
-      models_seed_dir = clean_path(args.models_seed_dir)
-      await move_models_to_hf(models_seed_dir)
-    except Exception as e:
-      print(f"Error moving models to .cache/huggingface: {e}")
+    if not has_read or not has_write:
+        print(f"""
+              WARNING: Limited permissions for model storage directory: {hf_home}.
+              This may prevent model downloads from working correctly.
+              {"❌ No read access" if not has_read else ""}
+              {"❌ No write access" if not has_write else ""}
+              """)
+        
+    if not args.models_seed_dir is None:
+        try:
+            models_seed_dir = clean_path(args.models_seed_dir)
+            await move_models_to_hf(models_seed_dir)
+        except Exception as e:
+            print(f"Error moving models to .cache/huggingface: {e}")
 
-  def restore_cursor():
+    def restore_cursor():
+        if platform.system() != "Windows":
+            os.system("tput cnorm")  # Show cursor
+
+    # Restore the cursor when the program exits
+    atexit.register(restore_cursor)
+
+    # Use a more direct approach to handle signals
+    def handle_exit():
+        asyncio.ensure_future(shutdown(signal.SIGTERM, loop, node.server))
+
     if platform.system() != "Windows":
-        os.system("tput cnorm")  # Show cursor
+        for s in [signal.SIGINT, signal.SIGTERM]:
+            loop.add_signal_handler(s, handle_exit)
 
-  # Restore the cursor when the program exits
-  atexit.register(restore_cursor)
+    await node.start(wait_for_peers=args.wait_for_peers)
 
-  # Use a more direct approach to handle signals
-  def handle_exit():
-    asyncio.ensure_future(shutdown(signal.SIGTERM, loop, node.server))
+    # Start coordinator peer updates if using DownloadCoordinator
+    if isinstance(shard_downloader, DownloadCoordinator):
+        asyncio.create_task(update_coordinator_peers())
 
-  if platform.system() != "Windows":
-    for s in [signal.SIGINT, signal.SIGTERM]:
-      loop.add_signal_handler(s, handle_exit)
-
-  await node.start(wait_for_peers=args.wait_for_peers)
-
-  if args.command == "run" or args.run_model:
-    model_name = args.model_name or args.run_model
-    if not model_name:
-      print("Error: Model name is required when using 'run' command or --run-model")
-      return
-    await run_model_cli(node, inference_engine, model_name, args.prompt)
-  elif args.command == "eval" or args.command == 'train':
-    model_name = args.model_name
-    dataloader = lambda tok: load_dataset(args.data, preprocess=lambda item: tok(item)
+    if args.command == "run" or args.run_model:
+        model_name = args.model_name or args.run_model
+        if not model_name:
+            print("Error: Model name is required when using 'run' command or --run-model")
+            return
+        await run_model_cli(node, inference_engine, model_name, args.prompt)
+    elif args.command == "eval" or args.command == 'train':
+        model_name = args.model_name
+        dataloader = lambda tok: load_dataset(args.data, preprocess=lambda item: tok(item)
                                                    , loadline=lambda line: json.loads(line).get("text",""))
-    if args.command == 'eval':
-      if not model_name:
-        print("Error: Much like a human, I can't evaluate anything without a model")
-        return
-      await eval_model_cli(node, inference_engine, model_name, dataloader, args.batch_size)
+        if args.command == 'eval':
+            if not model_name:
+                print("Error: Much like a human, I can't evaluate anything without a model")
+                return
+            await eval_model_cli(node, inference_engine, model_name, dataloader, args.batch_size)
+        else:
+            if not model_name:
+                print("Error: This train ain't leaving the station without a model")
+                return
+            await train_model_cli(node, inference_engine, model_name, dataloader, args.batch_size, args.iters, save_interval=args.save_every, checkpoint_dir=args.save_checkpoint_dir)
+        
     else:
-      if not model_name:
-        print("Error: This train ain't leaving the station without a model")
-        return
-      await train_model_cli(node, inference_engine, model_name, dataloader, args.batch_size, args.iters, save_interval=args.save_every, checkpoint_dir=args.save_checkpoint_dir)
+        asyncio.create_task(api.run(port=args.chatgpt_api_port))  # Start the API server as a non-blocking task
+        await asyncio.Event().wait()
     
-  else:
-    asyncio.create_task(api.run(port=args.chatgpt_api_port))  # Start the API server as a non-blocking task
-    await asyncio.Event().wait()
-  
-  if args.wait_for_peers > 0:
-    print("Cooldown to allow peers to exit gracefully")
-    for i in tqdm(range(50)):
-      await asyncio.sleep(.1)
-
+    if args.wait_for_peers > 0:
+        print("Cooldown to allow peers to exit gracefully")
+        for i in tqdm(range(50)):
+            await asyncio.sleep(.1)
 
 def run():
   loop = asyncio.new_event_loop()

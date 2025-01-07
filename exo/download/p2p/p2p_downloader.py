@@ -12,7 +12,6 @@ from exo.networking.grpc.node_service_pb2 import (
     GetShardStatusRequest, GetShardStatusResponse,
     ShardChunk, TransferStatus
 )
-from datetime import timedelta
 
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 MAX_RETRIES = 3
@@ -133,9 +132,6 @@ class P2PShardDownloader(ShardDownloader):
         return None
 
     async def ensure_shard(self, shard: Shard, inference_engine_name: str) -> Path:
-        if DEBUG >= 2:
-            print(f"[P2P Download] ensure_shard called for shard {shard}")
-            
         self.current_shard = shard
         
         if shard in self.completed_downloads:
@@ -152,27 +148,16 @@ class P2PShardDownloader(ShardDownloader):
         available_peers = []
         if DEBUG >= 2:
             print(f"[P2P Download] Searching for peers with shard {shard}")
-            print(f"[P2P Download] Total peers available: {len(self.peers)}")
             
         for peer in self.peers:
             if peer in self.failed_peers:
-                if DEBUG >= 2:
-                    print(f"[P2P Download] Skipping failed peer {peer}")
                 continue
                 
-            if DEBUG >= 2:
-                print(f"[P2P Download] Checking peer {peer} for shard {shard}")
-                
             status = await self._check_peer_status(peer, shard, inference_engine_name)
-            if status and status.has_shard:
+            if status:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Peer {peer} has shard {shard} at {status.local_path} (size: {status.file_size})")
                 available_peers.append((peer, status))
-            elif DEBUG >= 2:
-                if status:
-                    print(f"[P2P Download] Peer {peer} does not have shard {shard}")
-                else:
-                    print(f"[P2P Download] Failed to get status from peer {peer}")
 
         if not available_peers:
             if DEBUG >= 2:
@@ -187,16 +172,13 @@ class P2PShardDownloader(ShardDownloader):
                 
             try:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Creating download task for shard {shard} from peer {peer}")
+                    print(f"[P2P Download] Attempting download from peer {peer}")
                     
                 download_task = asyncio.create_task(
                     self._download_shard(shard, inference_engine_name, peer)
                 )
                 self.active_downloads[shard] = download_task
                 
-                if DEBUG >= 2:
-                    print(f"[P2P Download] Waiting for download task to complete")
-                    
                 path = await download_task
                 self.completed_downloads[shard] = path
                 if DEBUG >= 2:
@@ -206,10 +188,6 @@ class P2PShardDownloader(ShardDownloader):
             except (asyncio.TimeoutError, grpc.aio.AioRpcError) as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Failed to download from peer {peer}: {str(e)}")
-                    print(f"[P2P Download] Error type: {type(e)}")
-                    if isinstance(e, grpc.aio.AioRpcError):
-                        print(f"[P2P Download] GRPC error code: {e.code()}")
-                        print(f"[P2P Download] GRPC error details: {e.details()}")
                 self.failed_peers.add(peer)
                 last_error = e
                 continue
@@ -217,23 +195,16 @@ class P2PShardDownloader(ShardDownloader):
             except Exception as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Unexpected error downloading from peer {peer}: {e}")
-                    print(f"[P2P Download] Error type: {type(e)}")
-                    print(f"[P2P Download] Traceback: {traceback.format_exc()}")
                 self.failed_peers.add(peer)
                 last_error = e
                 continue
                 
             finally:
                 if shard in self.active_downloads:
-                    if DEBUG >= 2:
-                        print(f"[P2P Download] Removing active download task for shard {shard}")
                     self.active_downloads.pop(shard)
 
         # If we get here, all peers failed
-        error_msg = f"All peers failed to download shard {shard}. Last error: {last_error}"
-        if DEBUG >= 2:
-            print(f"[P2P Download] {error_msg}")
-        raise PeerConnectionError(error_msg)
+        raise PeerConnectionError(f"All peers failed to download shard {shard}. Last error: {last_error}")
 
     async def _download_shard(
         self, shard: Shard, inference_engine_name: str, peer: PeerHandle
@@ -264,17 +235,11 @@ class P2PShardDownloader(ShardDownloader):
                 
                 # Report initial progress
                 self._on_progress.trigger_all(shard, RepoProgressEvent(
-                    repo_id=shard.model_id,
-                    repo_revision="main",  # P2P doesn't track revisions
-                    completed_files=0,
-                    total_files=1,
+                    status="downloading",
                     downloaded_bytes=0,
-                    downloaded_bytes_this_session=0,
-                    total_bytes=0,
+                    total_bytes=0,  # Will be updated with first chunk
                     overall_speed=0,
-                    overall_eta=timedelta(seconds=0),
-                    file_progress={},  # P2P doesn't track individual files
-                    status="downloading"
+                    overall_eta=0
                 ))
                 
                 with open(temp_path, "wb") as f:
@@ -298,17 +263,11 @@ class P2PShardDownloader(ShardDownloader):
                                 self._on_progress.trigger_all(
                                     shard,
                                     RepoProgressEvent(
-                                        repo_id=shard.model_id,
-                                        repo_revision="main",  # P2P doesn't track revisions
-                                        completed_files=0,
-                                        total_files=1,
-                                        downloaded_bytes=bytes_processed,
-                                        downloaded_bytes_this_session=bytes_processed,
+                                        status="downloading",
+                                        bytes_processed=bytes_processed,
                                         total_bytes=total_bytes,
                                         overall_speed=speed,
-                                        overall_eta=timedelta(seconds=eta),
-                                        file_progress={},  # P2P doesn't track individual files
-                                        status="downloading"
+                                        overall_eta=eta
                                     )
                                 )
                                 
@@ -319,17 +278,11 @@ class P2PShardDownloader(ShardDownloader):
                     
                     # Report completion
                     self._on_progress.trigger_all(shard, RepoProgressEvent(
-                        repo_id=shard.model_id,
-                        repo_revision="main",  # P2P doesn't track revisions
-                        completed_files=1,
-                        total_files=1,
-                        downloaded_bytes=metadata.metadata.total_size,
-                        downloaded_bytes_this_session=metadata.metadata.total_size,
+                        status="complete",
+                        bytes_processed=metadata.metadata.total_size,
                         total_bytes=metadata.metadata.total_size,
                         overall_speed=0,
-                        overall_eta=timedelta(seconds=0),
-                        file_progress={},  # P2P doesn't track individual files
-                        status="complete"
+                        overall_eta=0
                     ))
                     
             if DEBUG >= 2:
@@ -343,17 +296,12 @@ class P2PShardDownloader(ShardDownloader):
                 temp_path.unlink()
             # Report failure
             self._on_progress.trigger_all(shard, RepoProgressEvent(
-                repo_id=shard.model_id,
-                repo_revision="main",  # P2P doesn't track revisions
-                completed_files=0,
-                total_files=1,
-                downloaded_bytes=0,
-                downloaded_bytes_this_session=0,
+                status="failed",
+                bytes_processed=0,
                 total_bytes=0,
                 overall_speed=0,
-                overall_eta=timedelta(seconds=0),
-                file_progress={},  # P2P doesn't track individual files
-                status="failed"
+                overall_eta=0,
+                error=str(e)
             ))
             raise
             
@@ -364,17 +312,12 @@ class P2PShardDownloader(ShardDownloader):
                 temp_path.unlink()
             # Report failure
             self._on_progress.trigger_all(shard, RepoProgressEvent(
-                repo_id=shard.model_id,
-                repo_revision="main",  # P2P doesn't track revisions
-                completed_files=0,
-                total_files=1,
-                downloaded_bytes=0,
-                downloaded_bytes_this_session=0,
+                status="failed",
+                bytes_processed=0,
                 total_bytes=0,
                 overall_speed=0,
-                overall_eta=timedelta(seconds=0),
-                file_progress={},  # P2P doesn't track individual files
-                status="failed"
+                overall_eta=0,
+                error=str(e)
             ))
             raise
 

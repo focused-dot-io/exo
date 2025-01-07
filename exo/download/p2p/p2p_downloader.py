@@ -133,6 +133,9 @@ class P2PShardDownloader(ShardDownloader):
         return None
 
     async def ensure_shard(self, shard: Shard, inference_engine_name: str) -> Path:
+        if DEBUG >= 2:
+            print(f"[P2P Download] ensure_shard called for shard {shard}")
+            
         self.current_shard = shard
         
         if shard in self.completed_downloads:
@@ -149,16 +152,27 @@ class P2PShardDownloader(ShardDownloader):
         available_peers = []
         if DEBUG >= 2:
             print(f"[P2P Download] Searching for peers with shard {shard}")
+            print(f"[P2P Download] Total peers available: {len(self.peers)}")
             
         for peer in self.peers:
             if peer in self.failed_peers:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Skipping failed peer {peer}")
                 continue
                 
+            if DEBUG >= 2:
+                print(f"[P2P Download] Checking peer {peer} for shard {shard}")
+                
             status = await self._check_peer_status(peer, shard, inference_engine_name)
-            if status:
+            if status and status.has_shard:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Peer {peer} has shard {shard} at {status.local_path} (size: {status.file_size})")
                 available_peers.append((peer, status))
+            elif DEBUG >= 2:
+                if status:
+                    print(f"[P2P Download] Peer {peer} does not have shard {shard}")
+                else:
+                    print(f"[P2P Download] Failed to get status from peer {peer}")
 
         if not available_peers:
             if DEBUG >= 2:
@@ -173,13 +187,16 @@ class P2PShardDownloader(ShardDownloader):
                 
             try:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Attempting download from peer {peer}")
+                    print(f"[P2P Download] Creating download task for shard {shard} from peer {peer}")
                     
                 download_task = asyncio.create_task(
                     self._download_shard(shard, inference_engine_name, peer)
                 )
                 self.active_downloads[shard] = download_task
                 
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Waiting for download task to complete")
+                    
                 path = await download_task
                 self.completed_downloads[shard] = path
                 if DEBUG >= 2:
@@ -189,6 +206,10 @@ class P2PShardDownloader(ShardDownloader):
             except (asyncio.TimeoutError, grpc.aio.AioRpcError) as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Failed to download from peer {peer}: {str(e)}")
+                    print(f"[P2P Download] Error type: {type(e)}")
+                    if isinstance(e, grpc.aio.AioRpcError):
+                        print(f"[P2P Download] GRPC error code: {e.code()}")
+                        print(f"[P2P Download] GRPC error details: {e.details()}")
                 self.failed_peers.add(peer)
                 last_error = e
                 continue
@@ -196,16 +217,23 @@ class P2PShardDownloader(ShardDownloader):
             except Exception as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Unexpected error downloading from peer {peer}: {e}")
+                    print(f"[P2P Download] Error type: {type(e)}")
+                    print(f"[P2P Download] Traceback: {traceback.format_exc()}")
                 self.failed_peers.add(peer)
                 last_error = e
                 continue
                 
             finally:
                 if shard in self.active_downloads:
+                    if DEBUG >= 2:
+                        print(f"[P2P Download] Removing active download task for shard {shard}")
                     self.active_downloads.pop(shard)
 
         # If we get here, all peers failed
-        raise PeerConnectionError(f"All peers failed to download shard {shard}. Last error: {last_error}")
+        error_msg = f"All peers failed to download shard {shard}. Last error: {last_error}"
+        if DEBUG >= 2:
+            print(f"[P2P Download] {error_msg}")
+        raise PeerConnectionError(error_msg)
 
     async def _download_shard(
         self, shard: Shard, inference_engine_name: str, peer: PeerHandle

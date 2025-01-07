@@ -27,16 +27,25 @@ class P2PShardDownloader(ShardDownloader):
         self.current_shard = shard
         
         if shard in self.completed_downloads:
+            if DEBUG >= 2:
+                print(f"Shard {shard} already downloaded at {self.completed_downloads[shard]}")
             return self.completed_downloads[shard]
 
         # Check if download already in progress
         if shard in self.active_downloads:
+            if DEBUG >= 2:
+                print(f"Download already in progress for shard {shard}")
             return await self.active_downloads[shard]
 
         # Find peers that have this shard
         available_peers = []
+        if DEBUG >= 2:
+            print(f"Searching for peers with shard {shard}")
+            
         for peer in self.peers:
             try:
+                if DEBUG >= 2:
+                    print(f"Checking peer {peer} for shard {shard}")
                 status = await peer.file_service.GetShardStatus(
                     GetShardStatusRequest(
                         shard=shard.to_proto(),
@@ -44,6 +53,8 @@ class P2PShardDownloader(ShardDownloader):
                     )
                 )
                 if status.has_shard:
+                    if DEBUG >= 2:
+                        print(f"Peer {peer} has shard {shard} at {status.local_path} (size: {status.file_size})")
                     available_peers.append((peer, status))
             except Exception as e:
                 if DEBUG >= 2:
@@ -51,10 +62,14 @@ class P2PShardDownloader(ShardDownloader):
                 continue
 
         if not available_peers:
+            if DEBUG >= 2:
+                print(f"No peers found with shard {shard}")
             raise FileNotFoundError(f"No peers have shard {shard}")
 
         # Choose peer with shard (for now just take first available)
         chosen_peer, status = available_peers[0]
+        if DEBUG >= 2:
+            print(f"Selected peer {chosen_peer} to download shard {shard}")
         
         # Start download
         download_task = asyncio.create_task(
@@ -65,6 +80,8 @@ class P2PShardDownloader(ShardDownloader):
         try:
             path = await download_task
             self.completed_downloads[shard] = path
+            if DEBUG >= 2:
+                print(f"Successfully downloaded shard {shard} to {path}")
             return path
         finally:
             if shard in self.active_downloads:
@@ -73,6 +90,9 @@ class P2PShardDownloader(ShardDownloader):
     async def _download_shard(
         self, shard: Shard, inference_engine_name: str, peer: PeerHandle
     ) -> Path:
+        if DEBUG >= 2:
+            print(f"Starting download of shard {shard} from peer {peer}")
+            
         # Create metadata message
         metadata = ShardChunk.Metadata(
             shard=shard.to_proto(),
@@ -85,21 +105,30 @@ class P2PShardDownloader(ShardDownloader):
         stream = peer.file_service.TransferShard()
         
         # Send initial metadata request
+        if DEBUG >= 2:
+            print(f"Sending metadata request for shard {shard}")
         await stream.send(ShardChunk(metadata=metadata))
         
         # Get response with actual metadata
         response = await stream.recv()
         if not response or response.status == TransferStatus.ERROR:
-            raise Exception(f"Failed to start transfer: {response.error_message if response else 'No response'}")
+            error_msg = f"Failed to start transfer: {response.error_message if response else 'No response'}"
+            if DEBUG >= 2:
+                print(error_msg)
+            raise Exception(error_msg)
             
         # Create temporary file to write chunks
         temp_path = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
+        if DEBUG >= 2:
+            print(f"Writing shard {shard} to temporary file {temp_path}")
         
         try:
             with open(temp_path, "wb") as f:
                 async for chunk in stream:
                     if chunk.HasField("chunk_data"):
                         f.write(chunk.chunk_data)
+                        if DEBUG >= 3:  # More verbose logging for actual chunks
+                            print(f"Received chunk of size {len(chunk.chunk_data)} at offset {chunk.offset}")
                         # Trigger progress callback
                         self._on_progress.trigger_all(
                             shard,
@@ -110,11 +139,17 @@ class P2PShardDownloader(ShardDownloader):
                         )
                         
                     if chunk.is_last:
+                        if DEBUG >= 2:
+                            print(f"Received last chunk for shard {shard}")
                         break
                         
+            if DEBUG >= 2:
+                print(f"Completed download of shard {shard} to {temp_path}")
             return temp_path
             
         except Exception as e:
+            if DEBUG >= 2:
+                print(f"Error downloading shard {shard}: {e}")
             if temp_path.exists():
                 temp_path.unlink()
             raise e

@@ -83,6 +83,10 @@ class HFShardDownloader(ShardDownloader):
 
     weight_map = await get_weight_map(repo_name)
     allow_patterns = get_allow_patterns(weight_map, shard)
+    
+    if DEBUG >= 2:
+      print(f"Starting download for shard {shard} from repo {repo_name}")
+      print(f"Using allow patterns: {allow_patterns}")
 
     return await download_repo_files(repo_name, progress_callback=wrapped_progress_callback, allow_patterns=allow_patterns, max_parallel_downloads=self.max_parallel_downloads)
 

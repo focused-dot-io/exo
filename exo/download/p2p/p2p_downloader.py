@@ -16,6 +16,7 @@ from exo.networking.grpc.node_service_pb2 import (
     GetShardStatusRequest, GetShardStatusResponse,
     ShardChunk, TransferStatus
 )
+from exo.models import get_repo
 
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
 MAX_RETRIES = 3
@@ -227,10 +228,18 @@ class P2PShardDownloader(ShardDownloader):
         # Create a fresh temporary directory
         temp_dir = None
         try:
-            # Get HuggingFace cache directory
+            # Get HuggingFace cache directory and repo name
             hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
-            model_name = f"models--{shard.model_id.replace('/', '--')}"
+            repo_name = get_repo(shard.model_id, inference_engine_name)
+            if not repo_name:
+                raise ValueError(f"Could not find repo name for model {shard.model_id} and engine {inference_engine_name}")
+            
+            model_name = f"models--{repo_name.replace('/', '--')}"
             final_model_dir = Path(hf_home) / model_name
+            
+            if DEBUG >= 2:
+                print(f"[P2P Download] Using repo name: {repo_name}")
+                print(f"[P2P Download] Using model name: {model_name}")
             
             # Create temp directory for download
             temp_dir = Path(tempfile.mkdtemp(prefix="shard_download_"))
@@ -373,10 +382,16 @@ class P2PShardDownloader(ShardDownloader):
             # Move the files
             final_path = final_snapshot_dir / "model.safetensors"
             shutil.move(str(temp_path), str(final_path))
-            shutil.move(str(config_path), str(final_snapshot_dir / "config.json"))
+            
+            # Copy config.json to both locations
+            root_config = final_model_dir / "config.json"
+            snapshot_config = final_snapshot_dir / "config.json"
+            shutil.copy2(str(config_path), str(root_config))  # Copy to root
+            shutil.move(str(config_path), str(snapshot_config))  # Move to snapshot
             
             if DEBUG >= 2:
                 print(f"[P2P Download] Successfully moved files to {final_model_dir}")
+                print(f"[P2P Download] Created config.json at {root_config} and {snapshot_config}")
             
             # Store the directory path in completed_downloads, not the file path
             self.completed_downloads[shard] = final_model_dir

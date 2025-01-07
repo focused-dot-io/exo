@@ -400,6 +400,11 @@ class P2PShardDownloader(ShardDownloader):
                                     print(f"[P2P Download] Received last chunk for shard {shard}")
                                 break
                     
+                    # Verify file size
+                    actual_size = os.path.getsize(temp_path)
+                    if total_size > 0 and actual_size != total_size:
+                        raise RuntimeError(f"File size mismatch: expected {total_size}, got {actual_size}")
+                    
                     # Report completion
                     self._on_progress.trigger_all(shard, RepoProgressEvent(
                         repo_id=shard.model_id,
@@ -426,17 +431,50 @@ class P2PShardDownloader(ShardDownloader):
             
             # Move the files
             final_safetensors = final_snapshot_dir / "model.safetensors"
-            shutil.move(str(temp_path), str(final_safetensors))
+            
+            # Clean up any existing corrupted files
+            if final_safetensors.exists():
+                try:
+                    final_safetensors.unlink()
+                except Exception as e:
+                    if DEBUG >= 2:
+                        print(f"[P2P Download] Error cleaning up existing file: {e}")
+            
+            # Move files with verification
+            try:
+                shutil.move(str(temp_path), str(final_safetensors))
+                # Verify the moved file
+                if os.path.getsize(final_safetensors) != actual_size:
+                    raise RuntimeError("File size changed during move")
+            except Exception as e:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Error moving file: {e}")
+                if final_safetensors.exists():
+                    final_safetensors.unlink()
+                raise RuntimeError(f"Failed to move file: {e}")
             
             # Copy config.json to both locations
             root_config = final_model_dir / "config.json"
             snapshot_config = final_snapshot_dir / "config.json"
-            shutil.copy2(str(config_path), str(root_config))  # Copy to root
-            shutil.move(str(config_path), str(snapshot_config))  # Move to snapshot
+            try:
+                shutil.copy2(str(config_path), str(root_config))  # Copy to root
+                shutil.move(str(config_path), str(snapshot_config))  # Move to snapshot
+            except Exception as e:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Error copying config files: {e}")
+                # Clean up on failure
+                if final_safetensors.exists():
+                    final_safetensors.unlink()
+                if root_config.exists():
+                    root_config.unlink()
+                if snapshot_config.exists():
+                    snapshot_config.unlink()
+                raise RuntimeError(f"Failed to copy config files: {e}")
             
             if DEBUG >= 2:
                 print(f"[P2P Download] Successfully moved files to {final_model_dir}")
                 print(f"[P2P Download] Created config.json at {root_config} and {snapshot_config}")
+                print(f"[P2P Download] Final file size: {os.path.getsize(final_safetensors)}")
             
             # Store the snapshot directory path
             self.completed_downloads[shard] = final_snapshot_dir

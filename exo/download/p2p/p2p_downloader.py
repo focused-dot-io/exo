@@ -223,8 +223,16 @@ class P2PShardDownloader(ShardDownloader):
         
         # Create a directory for the shard
         temp_dir = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
-        temp_dir.mkdir(parents=True, exist_ok=True)
         temp_path = temp_dir / "model.safetensors"
+        
+        # Clean up existing files if they exist
+        if temp_path.exists():
+            temp_path.unlink()
+        if temp_dir.exists():
+            temp_dir.rmdir()
+        
+        # Create fresh directory
+        temp_dir.mkdir(parents=True, exist_ok=True)
         
         try:
             # Start transfer stream with timeout

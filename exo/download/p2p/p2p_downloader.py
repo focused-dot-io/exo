@@ -42,25 +42,41 @@ class P2PShardDownloader(ShardDownloader):
 
         if DEBUG >= 2:
             print(f"[P2P Download] Checking if peer {peer} has shard {shard}")
-            print(f"[P2P Download] Peer connection state: {peer.channel._channel.check_connectivity_state(True)}")
 
-        for attempt in range(MAX_RETRIES):
+        # Wait for peer to be ready
+        for attempt in range(MAX_RETRIES * 2):  # More retries for initial connection
             try:
-                if DEBUG >= 2:
-                    print(f"[P2P Download] Attempt {attempt + 1}/{MAX_RETRIES} to check peer {peer}")
-                    
-                async with asyncio.timeout(CONNECT_TIMEOUT):
-                    # Ensure peer is connected
-                    if not peer.is_connected():
-                        if DEBUG >= 2:
-                            print(f"[P2P Download] Peer {peer} not connected, attempting to connect")
-                        try:
+                if not peer.is_connected():
+                    if DEBUG >= 2:
+                        print(f"[P2P Download] Peer {peer} not connected, attempting to connect (attempt {attempt + 1})")
+                    try:
+                        async with asyncio.timeout(CONNECT_TIMEOUT):
                             await peer.connect()
-                        except Exception as e:
-                            if DEBUG >= 2:
-                                print(f"[P2P Download] Failed to connect to peer {peer}: {e}")
-                            raise
-                            
+                    except Exception as e:
+                        if DEBUG >= 2:
+                            print(f"[P2P Download] Failed to connect to peer {peer}: {e}")
+                        if attempt < MAX_RETRIES * 2 - 1:
+                            await asyncio.sleep(RETRY_DELAY)
+                            continue
+                        self.failed_peers.add(peer)
+                        return None
+
+                # Check connection state
+                state = peer.channel._channel.check_connectivity_state(True)
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Peer {peer} connection state: {state}")
+
+                if state not in [grpc.ChannelConnectivity.READY, grpc.ChannelConnectivity.IDLE]:
+                    if DEBUG >= 2:
+                        print(f"[P2P Download] Peer {peer} not ready (state={state}), waiting...")
+                    if attempt < MAX_RETRIES * 2 - 1:
+                        await asyncio.sleep(RETRY_DELAY)
+                        continue
+                    self.failed_peers.add(peer)
+                    return None
+
+                # Try to get shard status
+                async with asyncio.timeout(CONNECT_TIMEOUT):
                     status = await peer.file_service.GetShardStatus(
                         GetShardStatusRequest(
                             shard=shard.to_proto(),
@@ -77,14 +93,14 @@ class P2PShardDownloader(ShardDownloader):
                     
             except asyncio.TimeoutError:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Timeout checking peer {peer} (attempt {attempt + 1}/{MAX_RETRIES})")
-                if attempt == MAX_RETRIES - 1:
+                    print(f"[P2P Download] Timeout checking peer {peer} (attempt {attempt + 1})")
+                if attempt == MAX_RETRIES * 2 - 1:
                     self.failed_peers.add(peer)
             except grpc.aio.AioRpcError as e:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] GRPC error checking peer {peer} (attempt {attempt + 1}/{MAX_RETRIES}): {e.details()}")
+                    print(f"[P2P Download] GRPC error checking peer {peer}: {e.details()}")
                     print(f"[P2P Download] GRPC error code: {e.code()}")
-                if attempt == MAX_RETRIES - 1:
+                if attempt == MAX_RETRIES * 2 - 1:
                     self.failed_peers.add(peer)
             except Exception as e:
                 if DEBUG >= 2:
@@ -93,7 +109,7 @@ class P2PShardDownloader(ShardDownloader):
                 self.failed_peers.add(peer)
                 break
 
-            if attempt < MAX_RETRIES - 1:
+            if attempt < MAX_RETRIES * 2 - 1:
                 await asyncio.sleep(RETRY_DELAY * (attempt + 1))
 
         return None

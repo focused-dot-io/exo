@@ -222,25 +222,29 @@ class P2PShardDownloader(ShardDownloader):
             raise
         
         # Create a directory for the shard
-        temp_dir = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
-        temp_path = temp_dir / "model.safetensors"
+        base_dir = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
+        model_dir = base_dir / "model"
+        temp_path = model_dir / "model.safetensors"
         
         # Clean up existing files if they exist
         try:
-            if temp_dir.exists():
-                if temp_dir.is_file():
-                    temp_dir.unlink()  # If it's a file, delete it
+            if base_dir.exists():
+                if base_dir.is_file():
+                    base_dir.unlink()  # If it's a file, delete it
                 else:
-                    # If it's a directory, clean it up
-                    for file in temp_dir.glob("*"):
-                        file.unlink()
-                    temp_dir.rmdir()
+                    # If it's a directory, clean it up recursively
+                    for item in base_dir.rglob("*"):
+                        if item.is_file():
+                            item.unlink()
+                        elif item.is_dir():
+                            item.rmdir()
+                    base_dir.rmdir()
         except Exception as e:
             if DEBUG >= 2:
                 print(f"[P2P Download] Error during cleanup: {e}")
         
-        # Create fresh directory
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        # Create fresh directories
+        model_dir.mkdir(parents=True, exist_ok=True)
         
         try:
             # Start transfer stream with timeout

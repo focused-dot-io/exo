@@ -21,7 +21,7 @@ class DownloadCoordinator(ShardDownloader):
         if DEBUG >= 2:
             print(f"[Coordinator] Initializing with {len(peers)} peers, disable_local_download={disable_local_download}")
             for peer in peers:
-                print(f"[Coordinator] Available peer: {peer}")
+                print(f"[Coordinator] Available peer: {peer}, connected={peer.is_connected()}")
                 
         self.disable_local_download = disable_local_download
         self.p2p_downloader = P2PShardDownloader(peers, quick_check) if not disable_local_download else None
@@ -43,21 +43,28 @@ class DownloadCoordinator(ShardDownloader):
         if DEBUG >= 2:
             print(f"[Coordinator] Ensuring shard {shard} for engine {inference_engine_name}")
             print(f"[Coordinator] Local download {'disabled' if self.disable_local_download else 'enabled'}")
+            if self.p2p_downloader:
+                print(f"[Coordinator] P2P downloader has {len(self.p2p_downloader.peers)} peers:")
+                for peer in self.p2p_downloader.peers:
+                    print(f"[Coordinator] - Peer {peer}, connected={peer.is_connected()}, failed={peer in self.p2p_downloader.failed_peers}")
 
         if not self.disable_local_download:
             try:
                 if DEBUG >= 2:
                     print(f"[Coordinator] Attempting P2P download for shard {shard}")
                 return await self.p2p_downloader.ensure_shard(shard, inference_engine_name)
-            except FileNotFoundError:
+            except FileNotFoundError as e:
                 if DEBUG >= 2:
-                    print(f"[Coordinator] No peers have shard {shard}, falling back to HF download")
+                    print(f"[Coordinator] No peers have shard {shard}, falling back to HF download: {e}")
             except PeerConnectionError as e:
                 if DEBUG >= 2:
                     print(f"[Coordinator] Peer connection failed for shard {shard}: {e}")
             except Exception as e:
                 if DEBUG >= 2:
                     print(f"[Coordinator] P2P download failed for shard {shard}: {e}")
+                    print(f"[Coordinator] Error type: {type(e)}")
+                    import traceback
+                    traceback.print_exc()
         else:
             if DEBUG >= 2:
                 print(f"[Coordinator] P2P download disabled, using HF download for shard {shard}")

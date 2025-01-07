@@ -127,12 +127,14 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             
             if DEBUG >= 2:
                 print(f"[Node Service] Checking if we have shard {shard} from repo {repo_name}")
+                print(f"[Node Service] Node ID: {self.node.node_id}")
             
             # Check if we have the shard locally
             snapshot_dir = await get_local_snapshot_dir(repo_name)
             if not snapshot_dir:
                 if DEBUG >= 2:
                     print(f"[Node Service] No snapshot directory found for {repo_name}")
+                    print(f"[Node Service] Looked in: {snapshot_dir}")
                 return node_service_pb2.GetShardStatusResponse(has_shard=False)
 
             # Get weight map to find shard files
@@ -147,6 +149,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             if not allow_patterns:
                 if DEBUG >= 2:
                     print(f"[Node Service] No patterns found for shard {shard}")
+                    print(f"[Node Service] Weight map: {weight_map}")
                 return node_service_pb2.GetShardStatusResponse(has_shard=False)
 
             # Find the main model file
@@ -154,10 +157,12 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             if not model_file.exists():
                 if DEBUG >= 2:
                     print(f"[Node Service] Model file not found at {model_file}")
+                    print(f"[Node Service] Snapshot directory contents: {list(snapshot_dir.iterdir())}")
                 return node_service_pb2.GetShardStatusResponse(has_shard=False)
 
             if DEBUG >= 2:
                 print(f"[Node Service] Found shard {shard} at {model_file}")
+                print(f"[Node Service] File size: {model_file.stat().st_size}")
                 
             return node_service_pb2.GetShardStatusResponse(
                 has_shard=True,
@@ -168,6 +173,9 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
         except Exception as e:
             if DEBUG >= 2:
                 print(f"[Node Service] Error in GetShardStatus: {e}")
+                print(f"[Node Service] Error type: {type(e)}")
+                import traceback
+                traceback.print_exc()
             return node_service_pb2.GetShardStatusResponse(has_shard=False)
 
     async def TransferShard(

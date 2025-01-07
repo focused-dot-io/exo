@@ -147,19 +147,42 @@ class P2PShardDownloader(ShardDownloader):
         model_name = f"models--{repo_name.replace('/', '--')}"
         final_model_dir = Path(hf_home) / model_name
         final_snapshot_dir = final_model_dir / "snapshots" / "current"
-        final_path = final_snapshot_dir / "model.safetensors"
+        final_safetensors = final_snapshot_dir / "model.safetensors"
         
-        # Check if shard already exists locally
-        if final_path.exists():
+        # Check if the complete model structure exists
+        def check_model_structure() -> bool:
+            if not all(p.exists() for p in [
+                final_model_dir,
+                final_snapshot_dir,
+                final_safetensors,
+                final_model_dir / "config.json",
+                final_snapshot_dir / "config.json"
+            ]):
+                return False
+            
+            # Verify safetensors is a file, not a directory
+            if not final_safetensors.is_file():
+                return False
+                
+            return True
+        
+        # Check if shard already exists locally with complete structure
+        if check_model_structure():
             if DEBUG >= 2:
-                print(f"[P2P Download] Shard {shard} already exists at {final_path}")
-            self.completed_downloads[shard] = final_path
-            return final_path
+                print(f"[P2P Download] Shard {shard} already exists with complete structure at {final_model_dir}")
+            self.completed_downloads[shard] = final_snapshot_dir
+            return final_snapshot_dir
         
         if shard in self.completed_downloads:
-            if DEBUG >= 2:
-                print(f"[P2P Download] Shard {shard} already downloaded at {self.completed_downloads[shard]}")
-            return self.completed_downloads[shard]
+            snapshot_dir = self.completed_downloads[shard]
+            if check_model_structure():
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Shard {shard} already downloaded at {snapshot_dir}")
+                return snapshot_dir
+            else:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Cached shard at {snapshot_dir} has incomplete structure, will redownload")
+                self.completed_downloads.pop(shard)
 
         if shard in self.active_downloads:
             if DEBUG >= 2:
@@ -402,8 +425,8 @@ class P2PShardDownloader(ShardDownloader):
             final_snapshot_dir.mkdir(parents=True, exist_ok=True)
             
             # Move the files
-            final_path = final_snapshot_dir / "model.safetensors"
-            shutil.move(str(temp_path), str(final_path))
+            final_safetensors = final_snapshot_dir / "model.safetensors"
+            shutil.move(str(temp_path), str(final_safetensors))
             
             # Copy config.json to both locations
             root_config = final_model_dir / "config.json"
@@ -415,10 +438,10 @@ class P2PShardDownloader(ShardDownloader):
                 print(f"[P2P Download] Successfully moved files to {final_model_dir}")
                 print(f"[P2P Download] Created config.json at {root_config} and {snapshot_config}")
             
-            # Store the path to the actual safetensors file
-            self.completed_downloads[shard] = final_path
+            # Store the snapshot directory path
+            self.completed_downloads[shard] = final_snapshot_dir
             
-            return final_path
+            return final_snapshot_dir
             
         except asyncio.TimeoutError as e:
             if DEBUG >= 2:

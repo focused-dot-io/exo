@@ -216,13 +216,15 @@ class P2PShardDownloader(ShardDownloader):
             metadata = ShardChunk()
             metadata.metadata.shard.CopyFrom(shard.to_proto())
             metadata.metadata.inference_engine_name = inference_engine_name
-            # Don't set optional fields that might not exist
         except Exception as e:
             if DEBUG >= 2:
                 print(f"[P2P Download] Error creating metadata: {e}")
             raise
         
-        temp_path = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
+        # Create a directory for the shard
+        temp_dir = Path(f"/tmp/shard_download_{shard.model_id}_{shard.start_layer}_{shard.end_layer}")
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = temp_dir / "model.safetensors"
         
         try:
             # Start transfer stream with timeout

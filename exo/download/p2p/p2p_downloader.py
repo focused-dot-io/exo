@@ -229,7 +229,8 @@ class P2PShardDownloader(ShardDownloader):
             async with asyncio.timeout(CONNECT_TIMEOUT):
                 if DEBUG >= 2:
                     print(f"[P2P Download] Starting transfer stream for shard {shard}")
-                stream = peer.stub.TransferShard.__call__(metadata)
+                # Send initial metadata request
+                stream = peer.stub.TransferShard(metadata)
                 
                 if DEBUG >= 2:
                     print(f"[P2P Download] Writing shard {shard} to temporary file {temp_path}")

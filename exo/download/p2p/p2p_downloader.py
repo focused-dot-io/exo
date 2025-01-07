@@ -256,10 +256,11 @@ class P2PShardDownloader(ShardDownloader):
                     async with asyncio.timeout(TRANSFER_TIMEOUT):
                         # Read the initial metadata response
                         initial_response = await stream.read()
-                        if initial_response and initial_response.HasField("metadata"):
-                            metadata = initial_response.metadata
+                        total_size = 0
+                        if initial_response and initial_response.HasField("status"):
+                            total_size = initial_response.status.total_size
                             if DEBUG >= 2:
-                                print(f"[P2P Download] Got initial metadata: size={metadata.total_size}")
+                                print(f"[P2P Download] Got initial status: size={total_size}")
                         
                         while True:
                             chunk = await stream.read()
@@ -269,7 +270,7 @@ class P2PShardDownloader(ShardDownloader):
                             if chunk.HasField("chunk_data"):
                                 f.write(chunk.chunk_data)
                                 bytes_processed = chunk.offset + len(chunk.chunk_data)
-                                total_bytes = metadata.total_size or bytes_processed
+                                total_bytes = total_size or bytes_processed
                                 
                                 if DEBUG >= 3:
                                     print(f"[P2P Download] Received chunk of size {len(chunk.chunk_data)} at offset {chunk.offset}")
@@ -308,9 +309,9 @@ class P2PShardDownloader(ShardDownloader):
                         repo_revision="main",
                         completed_files=1,
                         total_files=1,
-                        downloaded_bytes=metadata.metadata.total_size,
-                        downloaded_bytes_this_session=metadata.metadata.total_size,
-                        total_bytes=metadata.metadata.total_size,
+                        downloaded_bytes=total_size,
+                        downloaded_bytes_this_session=total_size,
+                        total_bytes=total_size,
                         overall_speed=0,
                         overall_eta=timedelta(seconds=0),
                         file_progress={},

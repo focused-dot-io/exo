@@ -63,7 +63,7 @@ class P2PShardDownloader(ShardDownloader):
                         return None
 
                 # Check connection state
-                state = await peer.get_connection_state()
+                state = peer.channel._channel.check_connectivity_state(True)
                 if DEBUG >= 2:
                     print(f"[P2P Download] Peer {peer} connection state: {state}")
 

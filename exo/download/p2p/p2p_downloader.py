@@ -43,6 +43,7 @@ class P2PShardDownloader(ShardDownloader):
 
         if DEBUG >= 2:
             print(f"[P2P Download] Checking if peer {peer} has shard {shard}")
+            print(f"[P2P Download] Peer details - address: {peer.address}, port: {peer.port}")
         
         # Map of GRPC channel states for debugging
         GRPC_STATES = {
@@ -56,27 +57,46 @@ class P2PShardDownloader(ShardDownloader):
         for attempt in range(MAX_RETRIES):
             try:
                 is_connected = await peer.is_connected()
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Peer connection status: {is_connected}")
+                    if hasattr(peer, 'channel') and peer.channel:
+                        state = peer.channel._channel.check_connectivity_state(True)
+                        print(f"[P2P Download] Current channel state: {GRPC_STATES.get(state, f'UNKNOWN({state})')}")
+                
                 if not is_connected:
                     if DEBUG >= 2:
-                        print(f"[P2P Download] Attempting to connect to peer {peer} (attempt {attempt + 1})")
+                        print(f"[P2P Download] Attempting to connect to peer {peer} at {peer.address}:{peer.port} (attempt {attempt + 1})")
                     try:
                         async with asyncio.timeout(CONNECT_TIMEOUT):
                             await peer.connect()
+                            
+                            # Verify channel exists after connect
+                            if not hasattr(peer, 'channel') or not peer.channel:
+                                raise PeerConnectionError("Channel not created after connect")
+                            
                             # Wait for channel to be ready
                             state = peer.channel._channel.check_connectivity_state(True)
                             if DEBUG >= 2:
                                 print(f"[P2P Download] Initial connection state: {GRPC_STATES.get(state, f'UNKNOWN({state})')}")
                             
-                            # Wait for READY state
-                            while state != 2:  # READY
-                                await peer.channel.channel_ready()
-                                state = peer.channel._channel.check_connectivity_state(True)
-                                if DEBUG >= 2:
-                                    print(f"[P2P Download] Channel state changed to: {GRPC_STATES.get(state, f'UNKNOWN({state})')}")
+                            # Wait for READY state with timeout
+                            ready_timeout = CONNECT_TIMEOUT / 2  # Use half the connect timeout for ready wait
+                            async with asyncio.timeout(ready_timeout):
+                                while state != 2:  # READY
+                                    if state == 4:  # SHUTDOWN
+                                        raise PeerConnectionError("Channel shutdown while waiting for ready state")
+                                    if state == 3:  # TRANSIENT_FAILURE
+                                        raise PeerConnectionError("Channel in transient failure while waiting for ready state")
+                                        
+                                    await peer.channel.channel_ready()
+                                    state = peer.channel._channel.check_connectivity_state(True)
+                                    if DEBUG >= 2:
+                                        print(f"[P2P Download] Channel state changed to: {GRPC_STATES.get(state, f'UNKNOWN({state})')}")
                                 
-                    except (asyncio.TimeoutError, asyncio.CancelledError, grpc.aio.AioRpcError) as e:
+                    except (asyncio.TimeoutError, asyncio.CancelledError, grpc.aio.AioRpcError, PeerConnectionError) as e:
                         if DEBUG >= 2:
-                            print(f"[P2P Download] Connection error for peer {peer}: {e}")
+                            print(f"[P2P Download] Connection error for peer {peer}: {str(e)}")
+                            print(f"[P2P Download] Error type: {type(e)}")
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(RETRY_DELAY * (attempt + 1))
                             continue
@@ -101,7 +121,8 @@ class P2PShardDownloader(ShardDownloader):
                     
             except (asyncio.TimeoutError, asyncio.CancelledError, grpc.aio.AioRpcError) as e:
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Error checking peer {peer} (attempt {attempt + 1}): {e}")
+                    print(f"[P2P Download] Error checking peer {peer} (attempt {attempt + 1}): {str(e)}")
+                    print(f"[P2P Download] Error type: {type(e)}")
                 if attempt == MAX_RETRIES - 1:
                     self.failed_peers.add(peer)
             

@@ -138,6 +138,24 @@ class P2PShardDownloader(ShardDownloader):
     async def ensure_shard(self, shard: Shard, inference_engine_name: str) -> Path:
         self.current_shard = shard
         
+        # Get HuggingFace cache directory and repo name
+        hf_home = os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface/hub"))
+        repo_name = get_repo(shard.model_id, inference_engine_name)
+        if not repo_name:
+            raise ValueError(f"Could not find repo name for model {shard.model_id} and engine {inference_engine_name}")
+        
+        model_name = f"models--{repo_name.replace('/', '--')}"
+        final_model_dir = Path(hf_home) / model_name
+        final_snapshot_dir = final_model_dir / "snapshots" / "current"
+        final_path = final_snapshot_dir / "model.safetensors"
+        
+        # Check if shard already exists locally
+        if final_path.exists():
+            if DEBUG >= 2:
+                print(f"[P2P Download] Shard {shard} already exists at {final_path}")
+            self.completed_downloads[shard] = final_model_dir
+            return final_model_dir
+        
         if shard in self.completed_downloads:
             if DEBUG >= 2:
                 print(f"[P2P Download] Shard {shard} already downloaded at {self.completed_downloads[shard]}")
@@ -158,9 +176,9 @@ class P2PShardDownloader(ShardDownloader):
                 continue
                 
             status = await self._check_peer_status(peer, shard, inference_engine_name)
-            if status:
+            if status and getattr(status, 'has_shard', False):  # Only add peers that actually have the shard
                 if DEBUG >= 2:
-                    print(f"[P2P Download] Peer {peer} has shard {shard} at {status.local_path} (size: {status.file_size})")
+                    print(f"[P2P Download] Peer {peer} has shard {shard} at {getattr(status, 'local_path', 'unknown')} (size: {getattr(status, 'file_size', 0)})")
                 available_peers.append((peer, status))
 
         if not available_peers:
@@ -296,8 +314,12 @@ class P2PShardDownloader(ShardDownloader):
                             print(f"[P2P Download] Got initial response: {initial_response}")
                         
                         if isinstance(initial_response, TransferStatus):
+                            if hasattr(initial_response, 'status') and initial_response.status == "ERROR":
+                                error_msg = getattr(initial_response, 'error_message', 'Unknown error')
+                                raise RuntimeError(f"Transfer failed: {error_msg}")
+                            
                             try:
-                                total_size = initial_response.file_size  # Changed from total_size to file_size
+                                total_size = getattr(initial_response, 'file_size', 0)
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Got initial status with file size: {total_size}")
                             except Exception as e:

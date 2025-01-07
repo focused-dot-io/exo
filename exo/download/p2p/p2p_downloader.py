@@ -378,7 +378,10 @@ class P2PShardDownloader(ShardDownloader):
             if DEBUG >= 2:
                 print(f"[P2P Download] Successfully moved files to {final_model_dir}")
             
-            return final_path
+            # Store the directory path in completed_downloads, not the file path
+            self.completed_downloads[shard] = final_model_dir
+            
+            return final_model_dir
             
         except asyncio.TimeoutError as e:
             if DEBUG >= 2:

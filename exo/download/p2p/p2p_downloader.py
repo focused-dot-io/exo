@@ -257,17 +257,20 @@ class P2PShardDownloader(ShardDownloader):
                         # Read the initial metadata response
                         initial_response = await stream.read()
                         total_size = 0
-                        if initial_response and initial_response.HasField("status"):
-                            total_size = initial_response.status.total_size
+                        
+                        if isinstance(initial_response, TransferStatus):
+                            total_size = initial_response.total_size
                             if DEBUG >= 2:
                                 print(f"[P2P Download] Got initial status: size={total_size}")
                         
                         while True:
                             chunk = await stream.read()
                             if not chunk:
+                                if DEBUG >= 2:
+                                    print("[P2P Download] Stream ended")
                                 break
                                 
-                            if chunk.HasField("chunk_data"):
+                            if isinstance(chunk, ShardChunk) and chunk.chunk_data:
                                 f.write(chunk.chunk_data)
                                 bytes_processed = chunk.offset + len(chunk.chunk_data)
                                 total_bytes = total_size or bytes_processed
@@ -298,7 +301,7 @@ class P2PShardDownloader(ShardDownloader):
                                     )
                                 )
                             
-                            if chunk.is_last:
+                            if isinstance(chunk, ShardChunk) and chunk.is_last:
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Received last chunk for shard {shard}")
                                 break

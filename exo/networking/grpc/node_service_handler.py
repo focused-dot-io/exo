@@ -168,7 +168,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             request = await request_iterator.__anext__()
             if not request.HasField("metadata"):
                 yield node_service_pb2.TransferStatus(
-                    status=node_service_pb2.TransferStatus.ERROR,
+                    status="ERROR",
                     error_message="First message must contain metadata"
                 )
                 return
@@ -191,7 +191,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
                 if DEBUG >= 2:
                     print(f"[Node Service] No snapshot directory found for {repo_name}")
                 yield node_service_pb2.TransferStatus(
-                    status=node_service_pb2.TransferStatus.ERROR,
+                    status="ERROR",
                     error_message="Shard not found locally"
                 )
                 return
@@ -202,7 +202,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
                 if DEBUG >= 2:
                     print(f"[Node Service] Model file not found at {model_file}")
                 yield node_service_pb2.TransferStatus(
-                    status=node_service_pb2.TransferStatus.ERROR,
+                    status="ERROR",
                     error_message=f"Model file not found at {model_file}"
                 )
                 return
@@ -215,7 +215,8 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             
             # Send initial response with file info
             yield node_service_pb2.TransferStatus(
-                status=node_service_pb2.TransferStatus.OK,
+                status="OK",
+                file_size=file_size,
                 bytes_received=0
             )
             
@@ -226,36 +227,43 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
                     if not chunk:
                         break
                         
-                    chunk_data = node_service_pb2.ShardChunk(
+                    # Send chunk
+                    yield node_service_pb2.ShardChunk(
                         chunk_data=chunk,
                         offset=bytes_sent,
                         is_last=False
                     )
-                    await request_iterator.asend(chunk_data)
                     
                     bytes_sent += len(chunk)
                     if DEBUG >= 3:
                         print(f"[Node Service] Sent chunk of size {len(chunk)} at offset {bytes_sent}")
                     
-                    yield node_service_pb2.TransferStatus(
-                        status=node_service_pb2.TransferStatus.OK,
-                        bytes_received=bytes_sent
-                    )
+                    # Wait for client acknowledgment
+                    try:
+                        ack = await request_iterator.__anext__()
+                        if not isinstance(ack, node_service_pb2.TransferStatus):
+                            if DEBUG >= 2:
+                                print(f"[Node Service] Unexpected message type from client: {type(ack)}")
+                            continue
+                    except StopAsyncIteration:
+                        if DEBUG >= 2:
+                            print("[Node Service] Client stopped sending acknowledgments")
+                        return
                     
                     await asyncio.sleep(0)  # Yield control
-            
+                    
             # Send final chunk
-            await request_iterator.asend(node_service_pb2.ShardChunk(
+            yield node_service_pb2.ShardChunk(
                 chunk_data=b"",
                 offset=bytes_sent,
                 is_last=True
-            ))
+            )
                     
             # Send final status
             if DEBUG >= 2:
                 print(f"[Node Service] Completed transfer of shard {shard}")
             yield node_service_pb2.TransferStatus(
-                status=node_service_pb2.TransferStatus.OK,
+                status="OK",
                 bytes_received=file_size
             )
             
@@ -263,6 +271,6 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             if DEBUG >= 2:
                 print(f"[Node Service] Error in TransferShard: {e}")
             yield node_service_pb2.TransferStatus(
-                status=node_service_pb2.TransferStatus.ERROR,
+                status="ERROR",
                 error_message=str(e)
             ) 

@@ -157,15 +157,18 @@ class P2PShardDownloader(ShardDownloader):
         final_safetensors = final_snapshot_dir / "model.safetensors"
         
         # Check if we already have the file locally
-        if final_safetensors.exists():
+        if final_safetensors.exists() or final_safetensors.is_symlink():
             try:
-                # Verify file integrity
-                with open(final_safetensors, 'rb') as f:
-                    header = f.read(8)
-                    if len(header) == 8:
-                        if DEBUG >= 2:
-                            print(f"[P2P Download] Found valid local file at {final_safetensors}")
-                        return final_snapshot_dir
+                # Resolve symlink if it exists
+                actual_path = final_safetensors.resolve()
+                if actual_path.exists():
+                    # Verify file integrity
+                    with open(actual_path, 'rb') as f:
+                        header = f.read(8)
+                        if len(header) == 8:
+                            if DEBUG >= 2:
+                                print(f"[P2P Download] Found valid local file at {actual_path} (symlink: {final_safetensors.is_symlink()})")
+                            return final_snapshot_dir
             except Exception as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Error checking local file: {e}")
@@ -173,25 +176,32 @@ class P2PShardDownloader(ShardDownloader):
         # Check if shard already exists locally with complete structure
         def check_model_structure() -> bool:
             try:
-                if not all(p.exists() for p in [
+                # Check all required paths exist, following symlinks
+                required_paths = [
                     final_model_dir,
                     final_snapshot_dir,
                     final_safetensors,
                     final_model_dir / "config.json",
                     final_snapshot_dir / "config.json"
-                ]):
-                    return False
+                ]
+                
+                for path in required_paths:
+                    if not (path.exists() or (path.is_symlink() and path.resolve().exists())):
+                        return False
+                
+                # Get actual path of safetensors file, following symlink if needed
+                actual_safetensors = final_safetensors.resolve() if final_safetensors.is_symlink() else final_safetensors
                 
                 # Verify safetensors is a file, not a directory
-                if not final_safetensors.is_file():
+                if not actual_safetensors.is_file():
                     return False
                 
                 # Try to read the first few bytes to verify file integrity
-                with open(final_safetensors, 'rb') as f:
+                with open(actual_safetensors, 'rb') as f:
                     header = f.read(8)
                     if len(header) != 8:
                         if DEBUG >= 2:
-                            print(f"[P2P Download] File integrity check failed for {final_safetensors}")
+                            print(f"[P2P Download] File integrity check failed for {actual_safetensors}")
                         return False
                 
                 return True

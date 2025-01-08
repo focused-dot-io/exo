@@ -127,25 +127,42 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
 
             # Check if we have the shard locally
             shard = Shard.from_proto(request.shard)
-            repo = get_repo(shard.model_id, request.inference_engine_name)
-            local_path = await get_shard_path(repo, shard)
-
-            if local_path and local_path.exists():
+            repo_name = get_repo(shard.model_id, request.inference_engine_name)
+            
+            if DEBUG >= 2:
+                print(f"[Node Service] Looking for repo {repo_name}")
+            
+            # Find shard file in snapshot directory
+            snapshot_dir = await get_local_snapshot_dir(repo_name)
+            if not snapshot_dir:
                 if DEBUG >= 2:
-                    print(f"[Node Service] Found shard at {local_path}")
-                return node_service_pb2.GetShardStatusResponse(
-                    has_shard=True,
-                    local_path=str(local_path),
-                    file_size=local_path.stat().st_size
-                )
-            else:
-                if DEBUG >= 2:
-                    print(f"[Node Service] Shard not found at {local_path}")
+                    print(f"[Node Service] No snapshot directory found for {repo_name}")
                 return node_service_pb2.GetShardStatusResponse(
                     has_shard=False,
                     local_path="",
                     file_size=0
                 )
+
+            # Check for model file
+            model_file = snapshot_dir / "model.safetensors"
+            if not model_file.exists():
+                if DEBUG >= 2:
+                    print(f"[Node Service] Model file not found at {model_file}")
+                return node_service_pb2.GetShardStatusResponse(
+                    has_shard=False,
+                    local_path="",
+                    file_size=0
+                )
+
+            if DEBUG >= 2:
+                print(f"[Node Service] Found model file at {model_file}")
+                print(f"[Node Service] File size: {model_file.stat().st_size}")
+
+            return node_service_pb2.GetShardStatusResponse(
+                has_shard=True,
+                local_path=str(model_file),
+                file_size=model_file.stat().st_size
+            )
 
         except Exception as e:
             if DEBUG >= 2:

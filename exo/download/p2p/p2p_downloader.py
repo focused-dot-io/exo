@@ -19,9 +19,9 @@ from exo.networking.grpc.node_service_pb2 import (
 from exo.models import get_repo
 
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks
-MAX_RETRIES = 3
-RETRY_DELAY = 1.0  # seconds
-CONNECT_TIMEOUT = 10.0  # seconds
+MAX_RETRIES = 5  # Increased from 3
+RETRY_DELAY = 2.0  # Increased from 1.0
+CONNECT_TIMEOUT = 20.0  # Increased from 10.0
 TRANSFER_TIMEOUT = 300.0  # seconds
 
 class PeerConnectionError(Exception):
@@ -48,6 +48,7 @@ class P2PShardDownloader(ShardDownloader):
         if DEBUG >= 2:
             print(f"[P2P Download] Checking if peer {peer} has shard {shard}")
             print(f"[P2P Download] Peer details: {peer}")
+            print(f"[P2P Download] Peer address: {peer.addr() if hasattr(peer, 'addr') else 'unknown'}")
         
         # Map of GRPC channel states for debugging
         GRPC_STATES = {
@@ -101,6 +102,8 @@ class P2PShardDownloader(ShardDownloader):
                         if DEBUG >= 2:
                             print(f"[P2P Download] Connection error for peer {peer}: {str(e)}")
                             print(f"[P2P Download] Error type: {type(e)}")
+                            print(f"[P2P Download] Stack trace:")
+                            traceback.print_exc()
                         if attempt < MAX_RETRIES - 1:
                             await asyncio.sleep(RETRY_DELAY * (attempt + 1))
                             continue
@@ -121,12 +124,16 @@ class P2PShardDownloader(ShardDownloader):
                         print(f"[P2P Download] Got status from peer {peer}: has_shard={getattr(status, 'has_shard', False)}")
                         if getattr(status, 'has_shard', False):
                             print(f"[P2P Download] Shard location: {getattr(status, 'local_path', 'unknown')}, size: {getattr(status, 'file_size', 0)}")
+                        else:
+                            print(f"[P2P Download] Peer does not have the shard")
                     return status
                     
             except (asyncio.TimeoutError, asyncio.CancelledError, grpc.aio.AioRpcError) as e:
                 if DEBUG >= 2:
                     print(f"[P2P Download] Error checking peer {peer} (attempt {attempt + 1}): {str(e)}")
                     print(f"[P2P Download] Error type: {type(e)}")
+                    print(f"[P2P Download] Stack trace:")
+                    traceback.print_exc()
                 if attempt == MAX_RETRIES - 1:
                     self.failed_peers.add(peer)
             

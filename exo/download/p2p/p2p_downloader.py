@@ -323,7 +323,9 @@ class P2PShardDownloader(ShardDownloader):
                 while True:
                     # Send acknowledgment for each chunk received
                     yield TransferStatus(
-                        status=TransferStatus.OK
+                        status=TransferStatus.OK,
+                        bytes_received=0,
+                        error_message=""
                     )
 
             # Start transfer stream with timeout
@@ -362,13 +364,13 @@ class P2PShardDownloader(ShardDownloader):
                             if isinstance(response, TransferStatus):
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Got status: {response}")
-                                if response.status == "ERROR":
+                                if response.status == TransferStatus.ERROR:
                                     error_msg = getattr(response, 'error_message', 'Unknown error')
                                     raise RuntimeError(f"Transfer failed: {error_msg}")
-                                if hasattr(response, 'file_size'):
-                                    total_size = response.file_size
+                                if hasattr(response, 'total_bytes') and response.total_bytes > 0:
+                                    total_size = response.total_bytes
                                     if DEBUG >= 2:
-                                        print(f"[P2P Download] Got file size: {total_size}")
+                                        print(f"[P2P Download] Got total size: {total_size}")
                                 continue
                                 
                             if not isinstance(response, ShardChunk):
@@ -376,7 +378,15 @@ class P2PShardDownloader(ShardDownloader):
                                     print(f"[P2P Download] Skipping unexpected message type: {type(response)}")
                                 continue
                                 
-                            chunk_data = getattr(response, 'chunk_data', None)
+                            # Check if we have chunk data
+                            if not response.HasField('chunk_data'):
+                                if DEBUG >= 2:
+                                    print("[P2P Download] Received chunk without data field")
+                                if getattr(response, 'is_last', False):
+                                    break
+                                continue
+                                
+                            chunk_data = response.chunk_data
                             if not chunk_data:
                                 if DEBUG >= 2:
                                     print("[P2P Download] Received empty chunk")

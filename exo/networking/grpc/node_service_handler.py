@@ -215,7 +215,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
 
             # Get the model file
             model_file = snapshot_dir / "model.safetensors"
-            if not model_file.exists():
+            if not model_file.exists() and not model_file.is_symlink():
                 if DEBUG >= 2:
                     print(f"[Node Service] Model file not found at {model_file}")
                 yield node_service_pb2.TransferStatus(
@@ -223,12 +223,25 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
                     error_message=f"Model file not found at {model_file}"
                 )
                 return
+
+            # Resolve symlink if it exists
+            actual_model_file = model_file.resolve() if model_file.is_symlink() else model_file
+            if not actual_model_file.exists() or not actual_model_file.is_file():
+                if DEBUG >= 2:
+                    print(f"[Node Service] Actual model file not found at {actual_model_file}")
+                yield node_service_pb2.TransferStatus(
+                    status=node_service_pb2.TransferStatus.ERROR,
+                    error_message=f"Actual model file not found at {actual_model_file}"
+                )
+                return
                 
-            file_size = model_file.stat().st_size
+            file_size = actual_model_file.stat().st_size
             bytes_sent = 0
             
             if DEBUG >= 2:
-                print(f"[Node Service] Starting transfer of {model_file} (size: {file_size})")
+                print(f"[Node Service] Starting transfer of {actual_model_file} (size: {file_size})")
+                if model_file.is_symlink():
+                    print(f"[Node Service] Following symlink: {model_file} -> {actual_model_file}")
             
             # Send initial response with file info
             yield node_service_pb2.TransferStatus(
@@ -238,7 +251,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             )
             
             # Send file in chunks
-            with open(model_file, "rb") as f:
+            with open(actual_model_file, "rb") as f:
                 while True:
                     chunk = f.read(CHUNK_SIZE)
                     if not chunk:

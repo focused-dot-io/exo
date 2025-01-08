@@ -14,7 +14,7 @@ from exo.helpers import AsyncCallbackSystem, DEBUG
 from exo.networking.peer_handle import PeerHandle
 from exo.networking.grpc.node_service_pb2 import (
     GetShardStatusRequest, GetShardStatusResponse,
-    ShardChunk, TransferStatus
+    ShardChunk, TransferStatus, ShardChunk_Metadata
 )
 from exo.models import get_repo
 
@@ -278,11 +278,11 @@ class P2PShardDownloader(ShardDownloader):
             print(f"[P2P Download] Starting download of shard {shard} from peer {peer}")
             
         # Create metadata request
-        metadata = node_service_pb2.ShardChunk.Metadata(
+        metadata = ShardChunk_Metadata(
             shard=shard.to_proto(),
             inference_engine_name=inference_engine_name
         )
-        initial_request = node_service_pb2.ShardChunk(metadata=metadata)
+        initial_request = ShardChunk(metadata=metadata)
 
         # Create a fresh temporary directory
         temp_dir = None
@@ -322,7 +322,7 @@ class P2PShardDownloader(ShardDownloader):
                 yield initial_request
                 while True:
                     # Send acknowledgment for each chunk received
-                    yield node_service_pb2.TransferStatus(
+                    yield TransferStatus(
                         status="OK"
                     )
 
@@ -359,7 +359,7 @@ class P2PShardDownloader(ShardDownloader):
                         bytes_received = 0
                         
                         async for response in stream:
-                            if isinstance(response, node_service_pb2.TransferStatus):
+                            if isinstance(response, TransferStatus):
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Got status: {response}")
                                 if response.status == "ERROR":
@@ -371,7 +371,7 @@ class P2PShardDownloader(ShardDownloader):
                                         print(f"[P2P Download] Got file size: {total_size}")
                                 continue
                                 
-                            if not isinstance(response, node_service_pb2.ShardChunk):
+                            if not isinstance(response, ShardChunk):
                                 if DEBUG >= 2:
                                     print(f"[P2P Download] Skipping unexpected message type: {type(response)}")
                                 continue

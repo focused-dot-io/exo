@@ -367,8 +367,9 @@ class P2PShardDownloader(ShardDownloader):
                                 if response.status == TransferStatus.ERROR:
                                     error_msg = getattr(response, 'error_message', 'Unknown error')
                                     raise RuntimeError(f"Transfer failed: {error_msg}")
-                                if hasattr(response, 'total_bytes') and response.total_bytes > 0:
-                                    total_size = response.total_bytes
+                                # First status message contains total size
+                                if total_size == 0:
+                                    total_size = response.bytes_received
                                     if DEBUG >= 2:
                                         print(f"[P2P Download] Got total size: {total_size}")
                                 continue

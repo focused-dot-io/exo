@@ -234,7 +234,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             yield node_service_pb2.TransferStatus(
                 status=node_service_pb2.TransferStatus.OK,
                 bytes_received=0,
-                total_bytes=file_size
+                error_message=""
             )
             
             # Send file in chunks
@@ -282,7 +282,7 @@ class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
             yield node_service_pb2.TransferStatus(
                 status=node_service_pb2.TransferStatus.OK,
                 bytes_received=file_size,
-                total_bytes=file_size
+                error_message=""
             )
             
         except Exception as e:

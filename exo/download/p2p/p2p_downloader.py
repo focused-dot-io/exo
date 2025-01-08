@@ -14,7 +14,7 @@ from exo.helpers import AsyncCallbackSystem, DEBUG
 from exo.networking.peer_handle import PeerHandle
 from exo.networking.grpc.node_service_pb2 import (
     GetShardStatusRequest, GetShardStatusResponse,
-    ShardChunk, TransferStatus, ShardChunk_Metadata
+    ShardChunk, TransferStatus
 )
 from exo.models import get_repo
 
@@ -278,7 +278,7 @@ class P2PShardDownloader(ShardDownloader):
             print(f"[P2P Download] Starting download of shard {shard} from peer {peer}")
             
         # Create metadata request
-        metadata = ShardChunk_Metadata(
+        metadata = ShardChunk.Metadata(
             shard=shard.to_proto(),
             inference_engine_name=inference_engine_name
         )
@@ -323,7 +323,7 @@ class P2PShardDownloader(ShardDownloader):
                 while True:
                     # Send acknowledgment for each chunk received
                     yield TransferStatus(
-                        status="OK"
+                        status=TransferStatus.OK
                     )
 
             # Start transfer stream with timeout

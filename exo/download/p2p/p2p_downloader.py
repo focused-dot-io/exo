@@ -349,7 +349,7 @@ class P2PShardDownloader(ShardDownloader):
                         while True:
                             try:
                                 response = await stream.read()
-                                if response is None:
+                                if response is None or str(type(response)).find('_EOF') != -1:
                                     if DEBUG >= 2:
                                         print("[P2P Download] Stream ended")
                                     break
@@ -361,45 +361,51 @@ class P2PShardDownloader(ShardDownloader):
                                         error_msg = getattr(response, 'error_message', 'Unknown error')
                                         raise RuntimeError(f"Transfer failed: {error_msg}")
                                     total_size = getattr(response, 'file_size', 0)
+                                    if DEBUG >= 2:
+                                        print(f"[P2P Download] Got file size: {total_size}")
                                     continue
                                     
                                 if not isinstance(response, ShardChunk):
                                     if DEBUG >= 2:
-                                        print(f"[P2P Download] Unexpected message type: {type(response)}")
+                                        print(f"[P2P Download] Skipping unexpected message type: {type(response)}")
                                     continue
                                     
                                 chunk_data = getattr(response, 'chunk_data', None)
-                                if chunk_data:
-                                    f.write(chunk_data)
-                                    offset = getattr(response, 'offset', 0)
-                                    bytes_processed = offset + len(chunk_data)
-                                    total_bytes = total_size or bytes_processed
+                                if not chunk_data:
+                                    if DEBUG >= 2:
+                                        print("[P2P Download] Received empty chunk, skipping")
+                                    continue
                                     
-                                    if DEBUG >= 3:
-                                        print(f"[P2P Download] Received chunk of size {len(chunk_data)} at offset {offset}")
-                                    
-                                    # Calculate speed and ETA
-                                    elapsed = asyncio.get_event_loop().time() - start_time
-                                    speed = bytes_processed / elapsed if elapsed > 0 else 0
-                                    remaining_bytes = total_bytes - bytes_processed
-                                    eta = remaining_bytes / speed if speed > 0 else 0
-                                    
-                                    self._on_progress.trigger_all(
-                                        shard,
-                                        RepoProgressEvent(
-                                            repo_id=shard.model_id,
-                                            repo_revision="main",
-                                            completed_files=0,
-                                            total_files=1,
-                                            downloaded_bytes=bytes_processed,
-                                            downloaded_bytes_this_session=bytes_processed,
-                                            total_bytes=total_bytes,
-                                            overall_speed=speed,
-                                            overall_eta=timedelta(seconds=eta),
-                                            file_progress={},
-                                            status="downloading"
-                                        )
+                                f.write(chunk_data)
+                                offset = getattr(response, 'offset', 0)
+                                bytes_processed = offset + len(chunk_data)
+                                total_bytes = total_size or bytes_processed
+                                
+                                if DEBUG >= 3:
+                                    print(f"[P2P Download] Received chunk of size {len(chunk_data)} at offset {offset}")
+                                
+                                # Calculate speed and ETA
+                                elapsed = asyncio.get_event_loop().time() - start_time
+                                speed = bytes_processed / elapsed if elapsed > 0 else 0
+                                remaining_bytes = total_bytes - bytes_processed
+                                eta = remaining_bytes / speed if speed > 0 else 0
+                                
+                                self._on_progress.trigger_all(
+                                    shard,
+                                    RepoProgressEvent(
+                                        repo_id=shard.model_id,
+                                        repo_revision="main",
+                                        completed_files=0,
+                                        total_files=1,
+                                        downloaded_bytes=bytes_processed,
+                                        downloaded_bytes_this_session=bytes_processed,
+                                        total_bytes=total_bytes,
+                                        overall_speed=speed,
+                                        overall_eta=timedelta(seconds=eta),
+                                        file_progress={},
+                                        status="downloading"
                                     )
+                                )
                                 
                                 if getattr(response, 'is_last', False):
                                     if DEBUG >= 2:

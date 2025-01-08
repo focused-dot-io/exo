@@ -1,307 +1,205 @@
-import numpy as np
-from exo.inference.shard import Shard
-from exo.orchestration import Node
-from exo import DEBUG
-from . import node_service_pb2
-from . import node_service_pb2_grpc
+import os
 import asyncio
 from pathlib import Path
-from typing import Optional, AsyncIterator
-from exo.download.hf.hf_helpers import get_local_snapshot_dir, get_weight_map, get_allow_patterns
-from exo.models import get_repo, get_shard_path
-import traceback
-from typing import Dict, List, Optional, Tuple
-import grpc
-import grpc.aio
+from typing import AsyncIterator, Optional
 
-CHUNK_SIZE = 1024 * 1024  # 1MB chunks
+from exo.networking.grpc.node_service_pb2 import (
+    ShardChunk, TransferStatus, Shard, ShardStatus, HealthCheckResponse
+)
+from exo.download.shard import Shard as ShardModel
+from exo.helpers import get_local_snapshot_dir
 
-class NodeServiceHandler(node_service_pb2_grpc.NodeServiceServicer):
-    def __init__(self, node: Node):
+DEBUG = int(os.environ.get("DEBUG", "0"))
+
+class NodeServiceHandler:
+    """Handler for node service requests."""
+
+    def __init__(self, node):
         self.node = node
 
-    async def SendPrompt(self, request, context):
-        shard = Shard(
-            model_id=request.shard.model_id,
-            start_layer=request.shard.start_layer,
-            end_layer=request.shard.end_layer,
-            n_layers=request.shard.n_layers,
-        )
-        prompt = request.prompt
-        request_id = request.request_id
-        result = await self.node.process_prompt(shard, prompt, request_id)
-        if DEBUG >= 5: print(f"SendPrompt {shard=} {prompt=} {request_id=} result: {result}")
-        tensor_data = result.tobytes() if result is not None else None
-        return node_service_pb2.Tensor(tensor_data=tensor_data, shape=result.shape, dtype=str(result.dtype)) if result is not None else node_service_pb2.Tensor()
-
-    async def SendTensor(self, request, context):
-        shard = Shard(
-            model_id=request.shard.model_id,
-            start_layer=request.shard.start_layer,
-            end_layer=request.shard.end_layer,
-            n_layers=request.shard.n_layers,
-        )
-        tensor = np.frombuffer(request.tensor.tensor_data, dtype=np.dtype(request.tensor.dtype)).reshape(request.tensor.shape)
-        request_id = request.request_id
-
-        result = await self.node.process_tensor(shard, tensor, request_id)
-        if DEBUG >= 5: print(f"SendTensor tensor {shard=} {tensor=} {request_id=} result: {result}")
-        tensor_data = result.tobytes() if result is not None else None
-        return node_service_pb2.Tensor(tensor_data=tensor_data, shape=result.shape, dtype=str(result.dtype)) if result is not None else node_service_pb2.Tensor()
-    
-    async def SendExample(self, request, context):
-        shard = Shard(
-            model_id=request.shard.model_id,
-            start_layer=request.shard.start_layer,
-            end_layer=request.shard.end_layer,
-            n_layers=request.shard.n_layers,
-        )
-        example = np.frombuffer(request.example.tensor_data, dtype=np.dtype(request.example.dtype)).reshape(request.example.shape)
-        target = np.frombuffer(request.target.tensor_data, dtype=np.dtype(request.target.dtype)).reshape(request.target.shape)
-        length = np.frombuffer(request.length.tensor_data, dtype=np.dtype(request.length.dtype)).reshape(request.length.shape)
-        train = request.train
-        request_id = request.request_id
-
-        if train and not shard.is_first_layer():
-            loss, grad = await self.node.process_example(shard, example, target, length, train, request_id)
-            tensor_data = grad.tobytes()
-            grad_tensor = node_service_pb2.Tensor(tensor_data=tensor_data, shape=grad.shape, dtype=str(grad.dtype))
-            return node_service_pb2.Loss(loss=loss, grads=grad_tensor)
-        else:
-            loss = await self.node.process_example(shard, example, target, length, train, request_id)
-            return node_service_pb2.Loss(loss=loss, grads=None)
-        
-    async def CollectTopology(self, request, context):
-        max_depth = request.max_depth
-        visited = set(request.visited)
-        topology = self.node.current_topology
-        nodes = {
-            node_id:
-                node_service_pb2.DeviceCapabilities(
-                    model=cap.model,
-                    chip=cap.chip,
-                    memory=cap.memory,
-                    flops=node_service_pb2.DeviceFlops(fp32=cap.flops.fp32, fp16=cap.flops.fp16, int8=cap.flops.int8),
-                )
-            for node_id, cap in topology.nodes.items()
-        }
-        peer_graph = {
-            node_id: node_service_pb2.PeerConnections(
-                connections=[
-                    node_service_pb2.PeerConnection(to_id=conn.to_id, description=conn.description)
-                    for conn in connections
-                ]
-            )
-            for node_id, connections in topology.peer_graph.items()
-        }
-        if DEBUG >= 5: print(f"CollectTopology {max_depth=} {visited=} {nodes=} {peer_graph=}")
-        return node_service_pb2.Topology(nodes=nodes, peer_graph=peer_graph)
-
-    async def SendResult(self, request, context):
-        request_id = request.request_id
-        result = request.result
-        is_finished = request.is_finished
-        if DEBUG >= 5: print(f"Received SendResult request: {request_id=} {result=} {is_finished=}")
-        self.node.on_token.trigger_all(request_id, result, is_finished)
-        return node_service_pb2.Empty()
-
-    async def SendOpaqueStatus(self, request, context):
-        request_id = request.request_id
-        status = request.status
-        if DEBUG >= 8: print(f"Received SendOpaqueStatus request: {request_id=} {status=}")
-        self.node.on_opaque_status.trigger_all(request_id, status)
-        return node_service_pb2.Empty()
-
-    async def HealthCheck(self, request, context):
-        return node_service_pb2.HealthCheckResponse(is_healthy=True) 
-
-    async def GetShardStatus(
-        self,
-        request: node_service_pb2.GetShardStatusRequest,
-        context
-    ) -> node_service_pb2.GetShardStatusResponse:
+    async def GetShardStatus(self, request: Shard, context) -> ShardStatus:
+        """Check if a shard is available locally."""
         try:
-            if DEBUG >= 2:
-                print(f"[Node Service] Checking if we have shard {Shard.from_proto(request.shard)} from repo")
-                print(f"[Node Service] Node ID: {self.node.id}")
-
-            # Check if we have the shard locally
-            shard = Shard.from_proto(request.shard)
-            repo_name = get_repo(shard.model_id, request.inference_engine_name)
-            
-            if DEBUG >= 2:
-                print(f"[Node Service] Looking for repo {repo_name}")
-            
-            # Find shard file in snapshot directory
-            snapshot_dir = await get_local_snapshot_dir(repo_name)
-            if not snapshot_dir:
-                if DEBUG >= 2:
-                    print(f"[Node Service] No snapshot directory found for {repo_name}")
-                return node_service_pb2.GetShardStatusResponse(
+            # Get model directory
+            model_dir = await get_local_snapshot_dir(request.model_id)
+            if not model_dir or not model_dir.exists():
+                return ShardStatus(
                     has_shard=False,
-                    local_path="",
-                    file_size=0
+                    error_message=f"Model directory not found: {model_dir}"
                 )
 
             # Check for model file
-            model_file = snapshot_dir / "model.safetensors"
+            model_file = model_dir / "model.safetensors"
             if not model_file.exists():
-                if DEBUG >= 2:
-                    print(f"[Node Service] Model file not found at {model_file}")
-                return node_service_pb2.GetShardStatusResponse(
+                return ShardStatus(
                     has_shard=False,
-                    local_path="",
-                    file_size=0
+                    error_message=f"Model file not found in {model_dir}"
                 )
 
-            if DEBUG >= 2:
-                print(f"[Node Service] Found model file at {model_file}")
-                print(f"[Node Service] File size: {model_file.stat().st_size}")
+            # Follow symlink if needed
+            if model_file.is_symlink():
+                real_path = model_file.resolve()
+                if not real_path.exists():
+                    return ShardStatus(
+                        has_shard=False,
+                        error_message=f"Symlink target not found: {real_path}"
+                    )
+                model_file = real_path
 
-            return node_service_pb2.GetShardStatusResponse(
-                has_shard=True,
-                local_path=str(model_file),
-                file_size=model_file.stat().st_size
-            )
+            # Check file integrity
+            try:
+                with open(model_file, 'rb') as f:
+                    header = f.read(8)
+                    if len(header) != 8:
+                        return ShardStatus(
+                            has_shard=False,
+                            error_message="File integrity check failed"
+                        )
+            except Exception as e:
+                return ShardStatus(
+                    has_shard=False,
+                    error_message=f"Error reading file: {e}"
+                )
+
+            return ShardStatus(has_shard=True)
 
         except Exception as e:
-            if DEBUG >= 2:
-                print(f"[Node Service] Error in GetShardStatus: {str(e)}")
-                print(f"[Node Service] Error type: {type(e)}")
-                traceback.print_exc()
-            return node_service_pb2.GetShardStatusResponse(
+            return ShardStatus(
                 has_shard=False,
-                local_path="",
-                file_size=0
+                error_message=str(e)
             )
 
-    async def TransferShard(
-        self,
-        request_iterator: AsyncIterator[node_service_pb2.ShardChunk],
-        context
-    ) -> AsyncIterator[node_service_pb2.TransferStatus]:
+    async def TransferShard(self, request_iterator: AsyncIterator[ShardChunk], context) -> AsyncIterator[TransferStatus]:
+        """Handle shard transfer requests from peers."""
         try:
-            # Get initial metadata request
-            request = await request_iterator.__anext__()
-            if not request.HasField("metadata"):
-                yield node_service_pb2.TransferStatus(
-                    status=node_service_pb2.TransferStatus.ERROR,
+            # Get initial request with metadata
+            initial_request = await anext(request_iterator)
+            if not initial_request.HasField('metadata'):
+                yield TransferStatus(
+                    status=TransferStatus.ERROR,
                     error_message="First message must contain metadata"
                 )
                 return
-                
-            metadata = request.metadata
-            shard = Shard(
-                model_id=metadata.shard.model_id,
-                start_layer=metadata.shard.start_layer,
-                end_layer=metadata.shard.end_layer,
-                n_layers=metadata.shard.n_layers,
-            )
-            repo_name = get_repo(shard.model_id, metadata.inference_engine_name)
-            
-            if DEBUG >= 2:
-                print(f"[Node Service] Starting transfer of shard {shard}")
-            
-            # Find shard file
-            snapshot_dir = await get_local_snapshot_dir(repo_name)
-            if not snapshot_dir:
-                if DEBUG >= 2:
-                    print(f"[Node Service] No snapshot directory found for {repo_name}")
-                yield node_service_pb2.TransferStatus(
-                    status=node_service_pb2.TransferStatus.ERROR,
-                    error_message="Shard not found locally"
+
+            # Extract shard info
+            shard = ShardModel.from_proto(initial_request.metadata.shard)
+            inference_engine = initial_request.metadata.inference_engine
+
+            # Get model directory
+            model_dir = await get_local_snapshot_dir(shard.model_id)
+            if not model_dir or not model_dir.exists():
+                yield TransferStatus(
+                    status=TransferStatus.ERROR,
+                    error_message=f"Model directory not found: {model_dir}"
                 )
                 return
 
-            # Get the model file
-            model_file = snapshot_dir / "model.safetensors"
-            if not model_file.exists() and not model_file.is_symlink():
-                if DEBUG >= 2:
-                    print(f"[Node Service] Model file not found at {model_file}")
-                yield node_service_pb2.TransferStatus(
-                    status=node_service_pb2.TransferStatus.ERROR,
-                    error_message=f"Model file not found at {model_file}"
+            # Verify model directory structure
+            if not (model_dir / "model.safetensors").exists():
+                yield TransferStatus(
+                    status=TransferStatus.ERROR,
+                    error_message=f"Model file not found in {model_dir}"
                 )
                 return
 
-            # Resolve symlink if it exists
-            actual_model_file = model_file.resolve() if model_file.is_symlink() else model_file
-            if not actual_model_file.exists() or not actual_model_file.is_file():
-                if DEBUG >= 2:
-                    print(f"[Node Service] Actual model file not found at {actual_model_file}")
-                yield node_service_pb2.TransferStatus(
-                    status=node_service_pb2.TransferStatus.ERROR,
-                    error_message=f"Actual model file not found at {actual_model_file}"
-                )
-                return
-                
-            file_size = actual_model_file.stat().st_size
-            bytes_sent = 0
-            
-            if DEBUG >= 2:
-                print(f"[Node Service] Starting transfer of {actual_model_file} (size: {file_size})")
-                if model_file.is_symlink():
-                    print(f"[Node Service] Following symlink: {model_file} -> {actual_model_file}")
-            
-            # Send initial response with file info
-            yield node_service_pb2.TransferStatus(
-                status=node_service_pb2.TransferStatus.OK,
-                bytes_received=0,
-                error_message=""
-            )
-            
-            # Send file in chunks
-            with open(actual_model_file, "rb") as f:
-                while True:
-                    chunk = f.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                        
-                    # Send chunk
-                    yield node_service_pb2.ShardChunk(
-                        chunk_data=chunk,
-                        offset=bytes_sent,
-                        is_last=False
-                    )
-                    
-                    bytes_sent += len(chunk)
-                    if DEBUG >= 3:
-                        print(f"[Node Service] Sent chunk of size {len(chunk)} at offset {bytes_sent}")
-                    
-                    # Wait for client acknowledgment
-                    try:
-                        ack = await request_iterator.__anext__()
-                        if not isinstance(ack, node_service_pb2.TransferStatus):
-                            if DEBUG >= 2:
-                                print(f"[Node Service] Unexpected message type from client: {type(ack)}")
+            # Get list of files to transfer
+            files_to_transfer = []
+            for file_path in model_dir.rglob('*'):
+                if file_path.is_file():
+                    # Follow symlinks
+                    if file_path.is_symlink():
+                        real_path = file_path.resolve()
+                        if not real_path.exists():
                             continue
-                    except StopAsyncIteration:
-                        if DEBUG >= 2:
-                            print("[Node Service] Client stopped sending acknowledgments")
-                        return
+                        file_path = real_path
                     
-                    await asyncio.sleep(0)  # Yield control
-                    
-            # Send final chunk
-            yield node_service_pb2.ShardChunk(
-                chunk_data=b"",
-                offset=bytes_sent,
-                is_last=True
+                    # Get relative path from model directory
+                    rel_path = file_path.relative_to(model_dir)
+                    files_to_transfer.append((file_path, rel_path))
+
+            if not files_to_transfer:
+                yield TransferStatus(
+                    status=TransferStatus.ERROR,
+                    error_message=f"No files found in {model_dir}"
+                )
+                return
+
+            # Calculate total size
+            total_size = sum(file_path.stat().st_size for file_path, _ in files_to_transfer)
+
+            # Send initial status with total size
+            yield TransferStatus(
+                status=TransferStatus.OK,
+                bytes_received=0,
+                total_bytes=total_size
             )
-                    
+
+            bytes_sent = 0
+            chunk_size = 1024 * 1024  # 1MB chunks
+
+            # Transfer each file
+            for file_path, rel_path in files_to_transfer:
+                # Send file metadata
+                yield ShardChunk(
+                    metadata=ShardChunk.Metadata(
+                        file_name=str(rel_path),
+                        file_size=file_path.stat().st_size
+                    )
+                )
+
+                # Transfer file in chunks
+                with open(file_path, 'rb') as f:
+                    while True:
+                        chunk = f.read(chunk_size)
+                        if not chunk:
+                            break
+
+                        # Send chunk
+                        yield ShardChunk(
+                            chunk_data=chunk,
+                            offset=bytes_sent
+                        )
+                        bytes_sent += len(chunk)
+
+                        # Wait for acknowledgment
+                        try:
+                            ack = await anext(request_iterator)
+                            if isinstance(ack, TransferStatus):
+                                if ack.status == TransferStatus.ERROR:
+                                    error_msg = getattr(ack, 'error_message', 'Unknown error')
+                                    yield TransferStatus(
+                                        status=TransferStatus.ERROR,
+                                        error_message=f"Client error: {error_msg}"
+                                    )
+                                    return
+                        except StopAsyncIteration:
+                            yield TransferStatus(
+                                status=TransferStatus.ERROR,
+                                error_message="Client disconnected"
+                            )
+                            return
+
+                # Send end of file marker
+                yield ShardChunk(is_last=True)
+
             # Send final status
-            if DEBUG >= 2:
-                print(f"[Node Service] Completed transfer of shard {shard}")
-            yield node_service_pb2.TransferStatus(
-                status=node_service_pb2.TransferStatus.OK,
-                bytes_received=file_size,
-                error_message=""
+            yield TransferStatus(
+                status=TransferStatus.OK,
+                bytes_received=total_size,
+                total_bytes=total_size
             )
-            
+
+        except Exception as e:
+            yield TransferStatus(
+                status=TransferStatus.ERROR,
+                error_message=str(e)
+            )
+
+    async def HealthCheck(self, request, context) -> HealthCheckResponse:
+        """Handle health check requests."""
+        try:
+            return HealthCheckResponse(is_healthy=True)
         except Exception as e:
             if DEBUG >= 2:
-                print(f"[Node Service] Error in TransferShard: {e}")
-            yield node_service_pb2.TransferStatus(
-                status=node_service_pb2.TransferStatus.ERROR,
-                error_message=str(e)
-            ) 
+                print(f"[Node Service] Health check failed: {e}")
+            return HealthCheckResponse(is_healthy=False) 

@@ -4,6 +4,7 @@ import grpc
 import warnings
 
 from exo.networking.grpc import file_service_pb2 as exo_dot_networking_dot_grpc_dot_file__service__pb2
+from exo.networking.grpc import node_service_pb2 as exo_dot_networking_dot_grpc_dot_node__service__pb2
 
 GRPC_GENERATED_VERSION = '1.68.0'
 GRPC_VERSION = grpc.__version__
@@ -35,14 +36,14 @@ class FileServiceStub(object):
             channel: A grpc.Channel.
         """
         self.GetShardStatus = channel.unary_unary(
-                '/file_service.FileService/GetShardStatus',
+                '/exo.networking.grpc.FileService/GetShardStatus',
                 request_serializer=exo_dot_networking_dot_grpc_dot_file__service__pb2.GetShardStatusRequest.SerializeToString,
                 response_deserializer=exo_dot_networking_dot_grpc_dot_file__service__pb2.GetShardStatusResponse.FromString,
                 _registered_method=True)
         self.TransferShard = channel.stream_stream(
-                '/file_service.FileService/TransferShard',
-                request_serializer=exo_dot_networking_dot_grpc_dot_file__service__pb2.ShardChunk.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_file__service__pb2.TransferStatus.FromString,
+                '/exo.networking.grpc.FileService/TransferShard',
+                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.SerializeToString,
+                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.FromString,
                 _registered_method=True)
 
 
@@ -73,14 +74,14 @@ def add_FileServiceServicer_to_server(servicer, server):
             ),
             'TransferShard': grpc.stream_stream_rpc_method_handler(
                     servicer.TransferShard,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_file__service__pb2.ShardChunk.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_file__service__pb2.TransferStatus.SerializeToString,
+                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.FromString,
+                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'file_service.FileService', rpc_method_handlers)
+            'exo.networking.grpc.FileService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('file_service.FileService', rpc_method_handlers)
+    server.add_registered_method_handlers('exo.networking.grpc.FileService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
@@ -101,7 +102,7 @@ class FileService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/file_service.FileService/GetShardStatus',
+            '/exo.networking.grpc.FileService/GetShardStatus',
             exo_dot_networking_dot_grpc_dot_file__service__pb2.GetShardStatusRequest.SerializeToString,
             exo_dot_networking_dot_grpc_dot_file__service__pb2.GetShardStatusResponse.FromString,
             options,
@@ -128,9 +129,9 @@ class FileService(object):
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            '/file_service.FileService/TransferShard',
-            exo_dot_networking_dot_grpc_dot_file__service__pb2.ShardChunk.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_file__service__pb2.TransferStatus.FromString,
+            '/exo.networking.grpc.FileService/TransferShard',
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.SerializeToString,
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.FromString,
             options,
             channel_credentials,
             insecure,

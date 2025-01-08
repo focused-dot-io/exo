@@ -24,71 +24,29 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&exo/networking/grpc/node_service.proto\x12\x0cnode_service\"S\n\x05Shard\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x13\n\x0bstart_layer\x18\x02 \x01(\x05\x12\x11\n\tend_layer\x18\x03 \x01(\x05\x12\x10\n\x08n_layers\x18\x04 \x01(\x05\"k\n\rPromptRequest\x12\"\n\x05shard\x18\x01 \x01(\x0b\x32\x13.node_service.Shard\x12\x0e\n\x06prompt\x18\x02 \x01(\t\x12\x17\n\nrequest_id\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\r\n\x0b_request_id\"\x81\x01\n\rTensorRequest\x12\"\n\x05shard\x18\x01 \x01(\x0b\x32\x13.node_service.Shard\x12$\n\x06tensor\x18\x02 \x01(\x0b\x32\x14.node_service.Tensor\x12\x17\n\nrequest_id\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\r\n\x0b_request_id\"\xde\x01\n\x0e\x45xampleRequest\x12\"\n\x05shard\x18\x01 \x01(\x0b\x32\x13.node_service.Shard\x12%\n\x07\x65xample\x18\x02 \x01(\x0b\x32\x14.node_service.Tensor\x12$\n\x06target\x18\x03 \x01(\x0b\x32\x14.node_service.Tensor\x12$\n\x06length\x18\x04 \x01(\x0b\x32\x14.node_service.Tensor\x12\r\n\x05train\x18\x05 \x01(\x08\x12\x17\n\nrequest_id\x18\x06 \x01(\tH\x00\x88\x01\x01\x42\r\n\x0b_request_id\"H\n\x04Loss\x12\x0c\n\x04loss\x18\x01 \x01(\x02\x12(\n\x05grads\x18\x02 \x01(\x0b\x32\x14.node_service.TensorH\x00\x88\x01\x01\x42\x08\n\x06_grads\"/\n\x19GetInferenceResultRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\"\\\n\x0fInferenceResult\x12)\n\x06tensor\x18\x01 \x01(\x0b\x32\x14.node_service.TensorH\x00\x88\x01\x01\x12\x13\n\x0bis_finished\x18\x02 \x01(\x08\x42\t\n\x07_tensor\";\n\x06Tensor\x12\x13\n\x0btensor_data\x18\x01 \x01(\x0c\x12\r\n\x05shape\x18\x02 \x03(\x05\x12\r\n\x05\x64type\x18\x03 \x01(\t\"<\n\x16\x43ollectTopologyRequest\x12\x0f\n\x07visited\x18\x01 \x03(\t\x12\x11\n\tmax_depth\x18\x02 \x01(\x05\"\x98\x02\n\x08Topology\x12\x30\n\x05nodes\x18\x01 \x03(\x0b\x32!.node_service.Topology.NodesEntry\x12\x39\n\npeer_graph\x18\x02 \x03(\x0b\x32%.node_service.Topology.PeerGraphEntry\x1aN\n\nNodesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12/\n\x05value\x18\x02 \x01(\x0b\x32 .node_service.DeviceCapabilities:\x02\x38\x01\x1aO\n\x0ePeerGraphEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12,\n\x05value\x18\x02 \x01(\x0b\x32\x1d.node_service.PeerConnections:\x02\x38\x01\"I\n\x0ePeerConnection\x12\r\n\x05to_id\x18\x01 \x01(\t\x12\x18\n\x0b\x64\x65scription\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x0e\n\x0c_description\"D\n\x0fPeerConnections\x12\x31\n\x0b\x63onnections\x18\x01 \x03(\x0b\x32\x1c.node_service.PeerConnection\"7\n\x0b\x44\x65viceFlops\x12\x0c\n\x04\x66p32\x18\x01 \x01(\x01\x12\x0c\n\x04\x66p16\x18\x02 \x01(\x01\x12\x0c\n\x04int8\x18\x03 \x01(\x01\"k\n\x12\x44\x65viceCapabilities\x12\r\n\x05model\x18\x01 \x01(\t\x12\x0c\n\x04\x63hip\x18\x02 \x01(\t\x12\x0e\n\x06memory\x18\x03 \x01(\x05\x12(\n\x05\x66lops\x18\x04 \x01(\x0b\x32\x19.node_service.DeviceFlops\"L\n\x11SendResultRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06result\x18\x02 \x03(\x05\x12\x13\n\x0bis_finished\x18\x03 \x01(\x08\"=\n\x17SendOpaqueStatusRequest\x12\x12\n\nrequest_id\x18\x01 \x01(\t\x12\x0e\n\x06status\x18\x02 \x01(\t\"\x14\n\x12HealthCheckRequest\")\n\x13HealthCheckResponse\x12\x12\n\nis_healthy\x18\x01 \x01(\x08\"\x07\n\x05\x45mpty\"Z\n\x15GetShardStatusRequest\x12\"\n\x05shard\x18\x01 \x01(\x0b\x32\x13.node_service.Shard\x12\x1d\n\x15inference_engine_name\x18\x02 \x01(\t\"y\n\x16GetShardStatusResponse\x12\x11\n\thas_shard\x18\x01 \x01(\x08\x12\x17\n\nlocal_path\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x16\n\tfile_size\x18\x03 \x01(\x03H\x01\x88\x01\x01\x42\r\n\x0b_local_pathB\x0c\n\n_file_size\"\xf8\x01\n\nShardChunk\x12\x35\n\x08metadata\x18\x01 \x01(\x0b\x32!.node_service.ShardChunk.MetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x06offset\x18\x03 \x01(\x04\x12\x0f\n\x07is_last\x18\x04 \x01(\x08\x1at\n\x08Metadata\x12\"\n\x05shard\x18\x01 \x01(\x0b\x32\x13.node_service.Shard\x12\x1d\n\x15inference_engine_name\x18\x02 \x01(\t\x12\x12\n\ntotal_size\x18\x03 \x01(\x03\x12\x11\n\tfile_name\x18\x04 \x01(\tB\x06\n\x04\x64\x61ta\"\xa8\x01\n\x0eTransferStatus\x12\x33\n\x06status\x18\x01 \x01(\x0e\x32#.node_service.TransferStatus.Status\x12\x1a\n\rerror_message\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x16\n\x0e\x62ytes_received\x18\x03 \x01(\x04\"\x1b\n\x06Status\x12\x06\n\x02OK\x10\x00\x12\t\n\x05\x45RROR\x10\x01\x42\x10\n\x0e_error_message2\xa5\x06\n\x0bNodeService\x12\x41\n\nSendPrompt\x12\x1b.node_service.PromptRequest\x1a\x14.node_service.Tensor\"\x00\x12\x41\n\nSendTensor\x12\x1b.node_service.TensorRequest\x1a\x14.node_service.Tensor\"\x00\x12\x41\n\x0bSendExample\x12\x1c.node_service.ExampleRequest\x1a\x12.node_service.Loss\"\x00\x12^\n\x12GetInferenceResult\x12\'.node_service.GetInferenceResultRequest\x1a\x1d.node_service.InferenceResult\"\x00\x12Q\n\x0f\x43ollectTopology\x12$.node_service.CollectTopologyRequest\x1a\x16.node_service.Topology\"\x00\x12\x44\n\nSendResult\x12\x1f.node_service.SendResultRequest\x1a\x13.node_service.Empty\"\x00\x12P\n\x10SendOpaqueStatus\x12%.node_service.SendOpaqueStatusRequest\x1a\x13.node_service.Empty\"\x00\x12T\n\x0bHealthCheck\x12 .node_service.HealthCheckRequest\x1a!.node_service.HealthCheckResponse\"\x00\x12]\n\x0eGetShardStatus\x12#.node_service.GetShardStatusRequest\x1a$.node_service.GetShardStatusResponse\"\x00\x12M\n\rTransferShard\x12\x18.node_service.ShardChunk\x1a\x1c.node_service.TransferStatus\"\x00(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&exo/networking/grpc/node_service.proto\x12\x13\x65xo.networking.grpc\"S\n\x05Shard\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x13\n\x0bstart_layer\x18\x02 \x01(\x05\x12\x11\n\tend_layer\x18\x03 \x01(\x05\x12\x10\n\x08n_layers\x18\x04 \x01(\x05\"\xad\x01\n\x0eTransferStatus\x12:\n\x06status\x18\x01 \x01(\x0e\x32*.exo.networking.grpc.TransferStatus.Status\x12\x15\n\rerror_message\x18\x02 \x01(\t\x12\x16\n\x0e\x62ytes_received\x18\x03 \x01(\x03\x12\x13\n\x0btotal_bytes\x18\x04 \x01(\x03\"\x1b\n\x06Status\x12\x06\n\x02OK\x10\x00\x12\t\n\x05\x45RROR\x10\x01\"\x83\x02\n\nShardChunk\x12<\n\x08metadata\x18\x01 \x01(\x0b\x32(.exo.networking.grpc.ShardChunk.MetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x06offset\x18\x03 \x01(\x03\x12\x0f\n\x07is_last\x18\x04 \x01(\x08\x1au\n\x08Metadata\x12)\n\x05shard\x18\x01 \x01(\x0b\x32\x1a.exo.networking.grpc.Shard\x12\x18\n\x10inference_engine\x18\x02 \x01(\t\x12\x11\n\tfile_name\x18\x03 \x01(\t\x12\x11\n\tfile_size\x18\x04 \x01(\x03\x42\t\n\x07\x63ontent\"\x14\n\x12HealthCheckRequest\")\n\x13HealthCheckResponse\x12\x12\n\nis_healthy\x18\x01 \x01(\x08\"7\n\x0bShardStatus\x12\x11\n\thas_shard\x18\x01 \x01(\x08\x12\x15\n\rerror_message\x18\x02 \x01(\t2\x9a\x02\n\x0bNodeService\x12N\n\x0eGetShardStatus\x12\x1a.exo.networking.grpc.Shard\x1a .exo.networking.grpc.ShardStatus\x12Y\n\rTransferShard\x12\x1f.exo.networking.grpc.ShardChunk\x1a#.exo.networking.grpc.TransferStatus(\x01\x30\x01\x12`\n\x0bHealthCheck\x12\'.exo.networking.grpc.HealthCheckRequest\x1a(.exo.networking.grpc.HealthCheckResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'exo.networking.grpc.node_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_TOPOLOGY_NODESENTRY']._loaded_options = None
-  _globals['_TOPOLOGY_NODESENTRY']._serialized_options = b'8\001'
-  _globals['_TOPOLOGY_PEERGRAPHENTRY']._loaded_options = None
-  _globals['_TOPOLOGY_PEERGRAPHENTRY']._serialized_options = b'8\001'
-  _globals['_SHARD']._serialized_start=56
-  _globals['_SHARD']._serialized_end=139
-  _globals['_PROMPTREQUEST']._serialized_start=141
-  _globals['_PROMPTREQUEST']._serialized_end=248
-  _globals['_TENSORREQUEST']._serialized_start=251
-  _globals['_TENSORREQUEST']._serialized_end=380
-  _globals['_EXAMPLEREQUEST']._serialized_start=383
-  _globals['_EXAMPLEREQUEST']._serialized_end=605
-  _globals['_LOSS']._serialized_start=607
-  _globals['_LOSS']._serialized_end=679
-  _globals['_GETINFERENCERESULTREQUEST']._serialized_start=681
-  _globals['_GETINFERENCERESULTREQUEST']._serialized_end=728
-  _globals['_INFERENCERESULT']._serialized_start=730
-  _globals['_INFERENCERESULT']._serialized_end=822
-  _globals['_TENSOR']._serialized_start=824
-  _globals['_TENSOR']._serialized_end=883
-  _globals['_COLLECTTOPOLOGYREQUEST']._serialized_start=885
-  _globals['_COLLECTTOPOLOGYREQUEST']._serialized_end=945
-  _globals['_TOPOLOGY']._serialized_start=948
-  _globals['_TOPOLOGY']._serialized_end=1228
-  _globals['_TOPOLOGY_NODESENTRY']._serialized_start=1069
-  _globals['_TOPOLOGY_NODESENTRY']._serialized_end=1147
-  _globals['_TOPOLOGY_PEERGRAPHENTRY']._serialized_start=1149
-  _globals['_TOPOLOGY_PEERGRAPHENTRY']._serialized_end=1228
-  _globals['_PEERCONNECTION']._serialized_start=1230
-  _globals['_PEERCONNECTION']._serialized_end=1303
-  _globals['_PEERCONNECTIONS']._serialized_start=1305
-  _globals['_PEERCONNECTIONS']._serialized_end=1373
-  _globals['_DEVICEFLOPS']._serialized_start=1375
-  _globals['_DEVICEFLOPS']._serialized_end=1430
-  _globals['_DEVICECAPABILITIES']._serialized_start=1432
-  _globals['_DEVICECAPABILITIES']._serialized_end=1539
-  _globals['_SENDRESULTREQUEST']._serialized_start=1541
-  _globals['_SENDRESULTREQUEST']._serialized_end=1617
-  _globals['_SENDOPAQUESTATUSREQUEST']._serialized_start=1619
-  _globals['_SENDOPAQUESTATUSREQUEST']._serialized_end=1680
-  _globals['_HEALTHCHECKREQUEST']._serialized_start=1682
-  _globals['_HEALTHCHECKREQUEST']._serialized_end=1702
-  _globals['_HEALTHCHECKRESPONSE']._serialized_start=1704
-  _globals['_HEALTHCHECKRESPONSE']._serialized_end=1745
-  _globals['_EMPTY']._serialized_start=1747
-  _globals['_EMPTY']._serialized_end=1754
-  _globals['_GETSHARDSTATUSREQUEST']._serialized_start=1756
-  _globals['_GETSHARDSTATUSREQUEST']._serialized_end=1846
-  _globals['_GETSHARDSTATUSRESPONSE']._serialized_start=1848
-  _globals['_GETSHARDSTATUSRESPONSE']._serialized_end=1969
-  _globals['_SHARDCHUNK']._serialized_start=1972
-  _globals['_SHARDCHUNK']._serialized_end=2220
-  _globals['_SHARDCHUNK_METADATA']._serialized_start=2096
-  _globals['_SHARDCHUNK_METADATA']._serialized_end=2212
-  _globals['_TRANSFERSTATUS']._serialized_start=2223
-  _globals['_TRANSFERSTATUS']._serialized_end=2391
-  _globals['_TRANSFERSTATUS_STATUS']._serialized_start=2346
-  _globals['_TRANSFERSTATUS_STATUS']._serialized_end=2373
-  _globals['_NODESERVICE']._serialized_start=2394
-  _globals['_NODESERVICE']._serialized_end=3199
+  _globals['_SHARD']._serialized_start=63
+  _globals['_SHARD']._serialized_end=146
+  _globals['_TRANSFERSTATUS']._serialized_start=149
+  _globals['_TRANSFERSTATUS']._serialized_end=322
+  _globals['_TRANSFERSTATUS_STATUS']._serialized_start=295
+  _globals['_TRANSFERSTATUS_STATUS']._serialized_end=322
+  _globals['_SHARDCHUNK']._serialized_start=325
+  _globals['_SHARDCHUNK']._serialized_end=584
+  _globals['_SHARDCHUNK_METADATA']._serialized_start=456
+  _globals['_SHARDCHUNK_METADATA']._serialized_end=573
+  _globals['_HEALTHCHECKREQUEST']._serialized_start=586
+  _globals['_HEALTHCHECKREQUEST']._serialized_end=606
+  _globals['_HEALTHCHECKRESPONSE']._serialized_start=608
+  _globals['_HEALTHCHECKRESPONSE']._serialized_end=649
+  _globals['_SHARDSTATUS']._serialized_start=651
+  _globals['_SHARDSTATUS']._serialized_end=706
+  _globals['_NODESERVICE']._serialized_start=709
+  _globals['_NODESERVICE']._serialized_end=991
 # @@protoc_insertion_point(module_scope)

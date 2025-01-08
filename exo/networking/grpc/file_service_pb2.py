@@ -25,25 +25,17 @@ _sym_db = _symbol_database.Default()
 from exo.networking.grpc import node_service_pb2 as exo_dot_networking_dot_grpc_dot_node__service__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&exo/networking/grpc/file_service.proto\x12\x0c\x66ile_service\x1a&exo/networking/grpc/node_service.proto\"Z\n\x15GetShardStatusRequest\x12\"\n\x05shard\x18\x01 \x01(\x0b\x32\x13.node_service.Shard\x12\x1d\n\x15inference_engine_name\x18\x02 \x01(\t\"y\n\x16GetShardStatusResponse\x12\x11\n\thas_shard\x18\x01 \x01(\x08\x12\x17\n\nlocal_path\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x16\n\tfile_size\x18\x03 \x01(\x03H\x01\x88\x01\x01\x42\r\n\x0b_local_pathB\x0c\n\n_file_size\"\xf8\x01\n\nShardChunk\x12\x35\n\x08metadata\x18\x01 \x01(\x0b\x32!.file_service.ShardChunk.MetadataH\x00\x12\x14\n\nchunk_data\x18\x02 \x01(\x0cH\x00\x12\x0e\n\x06offset\x18\x03 \x01(\x04\x12\x0f\n\x07is_last\x18\x04 \x01(\x08\x1at\n\x08Metadata\x12\"\n\x05shard\x18\x01 \x01(\x0b\x32\x13.node_service.Shard\x12\x1d\n\x15inference_engine_name\x18\x02 \x01(\t\x12\x12\n\ntotal_size\x18\x03 \x01(\x03\x12\x11\n\tfile_name\x18\x04 \x01(\tB\x06\n\x04\x64\x61ta\"\xa8\x01\n\x0eTransferStatus\x12\x33\n\x06status\x18\x01 \x01(\x0e\x32#.file_service.TransferStatus.Status\x12\x1a\n\rerror_message\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x16\n\x0e\x62ytes_received\x18\x03 \x01(\x04\"\x1b\n\x06Status\x12\x06\n\x02OK\x10\x00\x12\t\n\x05\x45RROR\x10\x01\x42\x10\n\x0e_error_message2\xbb\x01\n\x0b\x46ileService\x12]\n\x0eGetShardStatus\x12#.file_service.GetShardStatusRequest\x1a$.file_service.GetShardStatusResponse\"\x00\x12M\n\rTransferShard\x12\x18.file_service.ShardChunk\x1a\x1c.file_service.TransferStatus\"\x00(\x01\x30\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n&exo/networking/grpc/file_service.proto\x12\x13\x65xo.networking.grpc\x1a&exo/networking/grpc/node_service.proto\"a\n\x15GetShardStatusRequest\x12)\n\x05shard\x18\x01 \x01(\x0b\x32\x1a.exo.networking.grpc.Shard\x12\x1d\n\x15inference_engine_name\x18\x02 \x01(\t\"y\n\x16GetShardStatusResponse\x12\x11\n\thas_shard\x18\x01 \x01(\x08\x12\x17\n\nlocal_path\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x16\n\tfile_size\x18\x03 \x01(\x03H\x01\x88\x01\x01\x42\r\n\x0b_local_pathB\x0c\n\n_file_size2\xd7\x01\n\x0b\x46ileService\x12k\n\x0eGetShardStatus\x12*.exo.networking.grpc.GetShardStatusRequest\x1a+.exo.networking.grpc.GetShardStatusResponse\"\x00\x12[\n\rTransferShard\x12\x1f.exo.networking.grpc.ShardChunk\x1a#.exo.networking.grpc.TransferStatus\"\x00(\x01\x30\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'exo.networking.grpc.file_service_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_GETSHARDSTATUSREQUEST']._serialized_start=96
-  _globals['_GETSHARDSTATUSREQUEST']._serialized_end=186
-  _globals['_GETSHARDSTATUSRESPONSE']._serialized_start=188
-  _globals['_GETSHARDSTATUSRESPONSE']._serialized_end=309
-  _globals['_SHARDCHUNK']._serialized_start=312
-  _globals['_SHARDCHUNK']._serialized_end=560
-  _globals['_SHARDCHUNK_METADATA']._serialized_start=436
-  _globals['_SHARDCHUNK_METADATA']._serialized_end=552
-  _globals['_TRANSFERSTATUS']._serialized_start=563
-  _globals['_TRANSFERSTATUS']._serialized_end=731
-  _globals['_TRANSFERSTATUS_STATUS']._serialized_start=686
-  _globals['_TRANSFERSTATUS_STATUS']._serialized_end=713
-  _globals['_FILESERVICE']._serialized_start=734
-  _globals['_FILESERVICE']._serialized_end=921
+  _globals['_GETSHARDSTATUSREQUEST']._serialized_start=103
+  _globals['_GETSHARDSTATUSREQUEST']._serialized_end=200
+  _globals['_GETSHARDSTATUSRESPONSE']._serialized_start=202
+  _globals['_GETSHARDSTATUSRESPONSE']._serialized_end=323
+  _globals['_FILESERVICE']._serialized_start=326
+  _globals['_FILESERVICE']._serialized_end=541
 # @@protoc_insertion_point(module_scope)

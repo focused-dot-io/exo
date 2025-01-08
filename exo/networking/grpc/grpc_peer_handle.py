@@ -1,183 +1,82 @@
 import grpc
-import numpy as np
+import grpc.aio
 import asyncio
-from typing import Optional, Tuple, List
+from typing import Optional
+import os
 
-from . import node_service_pb2
-from . import node_service_pb2_grpc
+from exo.networking.peer_handle import PeerHandle
+from exo.networking.grpc.node_service_pb2_grpc import NodeServiceStub
+from exo.networking.grpc.node_service_pb2 import HealthCheckRequest
 
-from ..peer_handle import PeerHandle
-from exo.inference.shard import Shard
-from exo.topology.topology import Topology
-from exo.topology.device_capabilities import DeviceCapabilities, DeviceFlops
-from exo.helpers import DEBUG
-
+DEBUG = int(os.environ.get("DEBUG", "0"))
+CONNECT_TIMEOUT = 30  # seconds
 
 class GRPCPeerHandle(PeerHandle):
-  def __init__(self, _id: str, address: str, desc: str, device_capabilities: DeviceCapabilities):
-    self._id = _id
-    self.address = address
-    self.desc = desc
-    self._device_capabilities = device_capabilities
-    self.channel = None
-    self.stub = None
+    """Handle for a GRPC peer connection."""
 
-  def id(self) -> str:
-    return self._id
+    def __init__(self, peer_id: str, addr: str, description: str, device_capabilities):
+        super().__init__(peer_id, addr, description, device_capabilities)
+        self.channel: Optional[grpc.aio.Channel] = None
+        self.stub: Optional[NodeServiceStub] = None
 
-  def addr(self) -> str:
-    return self.address
+    async def connect(self) -> None:
+        """Connect to the peer."""
+        if self.channel is not None:
+            return
 
-  def description(self) -> str:
-    return self.desc
+        try:
+            # Create channel with timeout
+            async with asyncio.timeout(CONNECT_TIMEOUT):
+                self.channel = grpc.aio.insecure_channel(self.addr)
+                await self.channel.channel_ready()
+                self.stub = NodeServiceStub(self.channel)
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"[GRPC Peer] Error connecting to {self.addr}: {e}")
+            await self.disconnect()
+            raise
 
-  def device_capabilities(self) -> DeviceCapabilities:
-    return self._device_capabilities
+    async def disconnect(self) -> None:
+        """Disconnect from the peer."""
+        if self.channel is not None:
+            try:
+                await self.channel.close()
+            except Exception as e:
+                if DEBUG >= 2:
+                    print(f"[GRPC Peer] Error disconnecting from {self.addr}: {e}")
+            finally:
+                self.channel = None
+                self.stub = None
 
-  async def connect(self):
-    if self.channel is None:
-      self.channel = grpc.aio.insecure_channel(self.address, options=[
-        ("grpc.max_metadata_size", 32*1024*1024),
-        ('grpc.max_receive_message_length', 32*1024*1024),
-        ('grpc.max_send_message_length', 32*1024*1024)
-      ])
-      self.stub = node_service_pb2_grpc.NodeServiceStub(self.channel)
-    await self.channel.channel_ready()
+    async def is_connected(self) -> bool:
+        """Check if the peer is connected."""
+        if self.channel is None:
+            return False
+        try:
+            state = self.channel._channel.check_connectivity_state(True)
+            return state == grpc.ChannelConnectivity.READY
+        except Exception:
+            return False
 
-  async def is_connected(self) -> bool:
-    return self.channel is not None and self.channel.get_state() == grpc.ChannelConnectivity.READY
+    async def health_check(self) -> bool:
+        """Check if the peer is healthy."""
+        try:
+            if not await self.is_connected():
+                await self.connect()
+            
+            # Try a simple health check call
+            await asyncio.wait_for(
+                self.stub.HealthCheck(HealthCheckRequest()),
+                timeout=CONNECT_TIMEOUT
+            )
+            return True
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"[GRPC Peer] Health check failed for {self.peer_id}@{self.addr}: {e}")
+            return False
 
-  async def disconnect(self):
-    if self.channel:
-      await self.channel.close()
-    self.channel = None
-    self.stub = None
+    def __str__(self) -> str:
+        return f"GRPCPeer({self.peer_id}@{self.addr})"
 
-  async def _ensure_connected(self):
-    if not await self.is_connected(): await asyncio.wait_for(self.connect(), timeout=5)
-
-  async def health_check(self) -> bool:
-    try:
-      await self._ensure_connected()
-      request = node_service_pb2.HealthCheckRequest()
-      response = await asyncio.wait_for(self.stub.HealthCheck(request), timeout=5)
-      return response.is_healthy
-    except asyncio.TimeoutError:
-      return False
-    except Exception:
-      if DEBUG >= 4:
-        print(f"Health check failed for {self._id}@{self.address}.")
-        import traceback
-        traceback.print_exc()
-      return False
-
-  async def send_prompt(self, shard: Shard, prompt: str, request_id: Optional[str] = None) -> Optional[np.array]:
-    request = node_service_pb2.PromptRequest(
-      prompt=prompt,
-      shard=node_service_pb2.Shard(
-        model_id=shard.model_id,
-        start_layer=shard.start_layer,
-        end_layer=shard.end_layer,
-        n_layers=shard.n_layers,
-      ),
-      request_id=request_id,
-    )
-    response = await self.stub.SendPrompt(request)
-
-    if not response.tensor_data or not response.shape or not response.dtype:
-      return None
-
-    return np.frombuffer(response.tensor_data, dtype=np.dtype(response.dtype)).reshape(response.shape)
-
-  async def send_tensor(self, shard: Shard, tensor: np.ndarray, request_id: Optional[str] = None) -> Optional[np.array]:
-    request = node_service_pb2.TensorRequest(
-      shard=node_service_pb2.Shard(
-        model_id=shard.model_id,
-        start_layer=shard.start_layer,
-        end_layer=shard.end_layer,
-        n_layers=shard.n_layers,
-      ),
-      tensor=node_service_pb2.Tensor(tensor_data=tensor.tobytes(), shape=tensor.shape, dtype=str(tensor.dtype)),
-      request_id=request_id,
-    )
-    response = await self.stub.SendTensor(request)
-
-    if not response.tensor_data or not response.shape or not response.dtype:
-      return None
-
-    return np.frombuffer(response.tensor_data, dtype=np.dtype(response.dtype)).reshape(response.shape)
-  
-  async def send_example(self, shard: Shard, example: np.ndarray, target: np.ndarray, length: np.ndarray, train: bool, request_id: Optional[str] = None) -> Optional[np.array]:
-    request = node_service_pb2.ExampleRequest(
-      shard=node_service_pb2.Shard(
-        model_id=shard.model_id,
-        start_layer=shard.start_layer,
-        end_layer=shard.end_layer,
-        n_layers=shard.n_layers,
-      ),
-      example=node_service_pb2.Tensor(tensor_data=example.tobytes(), shape=example.shape, dtype=str(example.dtype)),
-      target=node_service_pb2.Tensor(tensor_data=target.tobytes(), shape=target.shape, dtype=str(target.dtype)),
-      length=node_service_pb2.Tensor(tensor_data=length.tobytes(), shape=length.shape, dtype=str(length.dtype)),
-      train=train,
-      request_id=request_id,
-    )
-    response = await self.stub.SendExample(request)
-    loss = response.loss
-    if train and not shard.is_first_layer():
-      grads = np.frombuffer(response.grads.tensor_data, dtype=np.dtype(response.grads.dtype)).reshape(response.grads.shape)
-      return loss, grads
-    else:
-      return loss
-  
-  async def send_loss(self, shard: Shard, tensor: np.ndarray, request_id: Optional[str] = None) -> Optional[np.array]:
-    request = node_service_pb2.TensorRequest(
-      shard=node_service_pb2.Shard(
-        model_id=shard.model_id,
-        start_layer=shard.start_layer,
-        end_layer=shard.end_layer,
-        n_layers=shard.n_layers,
-      ),
-      tensor=node_service_pb2.Tensor(tensor_data=tensor.tobytes(), shape=tensor.shape, dtype=str(tensor.dtype)),
-      request_id=request_id,
-    )
-    response = await self.stub.SendLoss(request)
-
-    if not response.tensor_data or not response.shape or not response.dtype:
-      return None
-
-    return np.frombuffer(response.tensor_data, dtype=np.dtype(response.dtype)).reshape(response.shape)
-
-  async def get_inference_result(self, request_id: str) -> Tuple[Optional[np.ndarray], bool]:
-    request = node_service_pb2.GetInferenceResultRequest(request_id=request_id)
-    response = await self.stub.GetInferenceResult(request)
-    if response.tensor is None:
-      return None, response.is_finished
-    return (
-      np.frombuffer(response.tensor.tensor_data, dtype=np.dtype(response.tensor.dtype)).reshape(response.tensor.shape),
-      response.is_finished,
-    )
-
-  async def collect_topology(self, visited: set[str], max_depth: int) -> Topology:
-    request = node_service_pb2.CollectTopologyRequest(visited=visited, max_depth=max_depth)
-    response = await self.stub.CollectTopology(request)
-    topology = Topology()
-    for node_id, capabilities in response.nodes.items():
-      device_capabilities = DeviceCapabilities(
-        model=capabilities.model,
-        chip=capabilities.chip,
-        memory=capabilities.memory,
-        flops=DeviceFlops(fp16=capabilities.flops.fp16, fp32=capabilities.flops.fp32, int8=capabilities.flops.int8)
-      )
-      topology.update_node(node_id, device_capabilities)
-    for node_id, peer_connections in response.peer_graph.items():
-      for conn in peer_connections.connections:
-        topology.add_edge(node_id, conn.to_id, conn.description)
-    return topology
-
-  async def send_result(self, request_id: str, result: List[int], is_finished: bool) -> None:
-    request = node_service_pb2.SendResultRequest(request_id=request_id, result=result, is_finished=is_finished)
-    await self.stub.SendResult(request)
-
-  async def send_opaque_status(self, request_id: str, status: str) -> None:
-    request = node_service_pb2.SendOpaqueStatusRequest(request_id=request_id, status=status)
-    await self.stub.SendOpaqueStatus(request)
+    def __repr__(self) -> str:
+        return self.__str__()

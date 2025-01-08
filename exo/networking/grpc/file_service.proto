@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package file_service;
+package exo.networking.grpc;
 
 import "exo/networking/grpc/node_service.proto";
 
@@ -13,7 +13,7 @@ service FileService {
 }
 
 message GetShardStatusRequest {
-  node_service.Shard shard = 1;
+  Shard shard = 1;
   string inference_engine_name = 2;
 }
 
@@ -21,33 +21,4 @@ message GetShardStatusResponse {
   bool has_shard = 1;
   optional string local_path = 2;
   optional int64 file_size = 3;
-}
-
-message ShardChunk {
-  // First chunk contains metadata
-  message Metadata {
-    node_service.Shard shard = 1;
-    string inference_engine_name = 2;
-    int64 total_size = 3;
-    string file_name = 4;
-  }
-  
-  oneof data {
-    Metadata metadata = 1;
-    bytes chunk_data = 2;
-  }
-  
-  uint64 offset = 3;  // Byte offset of this chunk
-  bool is_last = 4;   // True if this is the last chunk
-}
-
-message TransferStatus {
-  enum Status {
-    OK = 0;
-    ERROR = 1;
-  }
-  
-  Status status = 1;
-  optional string error_message = 2;
-  uint64 bytes_received = 3;  // Total bytes received so far
 } 

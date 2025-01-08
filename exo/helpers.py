@@ -326,3 +326,9 @@ def is_frozen():
   return getattr(sys, 'frozen', False) or os.path.basename(sys.executable) == "exo" \
     or ('Contents/MacOS' in str(os.path.dirname(sys.executable))) \
     or '__nuitka__' in globals() or getattr(sys, '__compiled__', False)
+
+async def get_local_snapshot_dir(model_id: str) -> Path:
+    """Get the local snapshot directory for a model."""
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    model_dir = cache_dir / model_id / "snapshots" / "current"
+    return model_dir

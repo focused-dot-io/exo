@@ -26,7 +26,8 @@ if _version_not_supported:
 
 
 class NodeServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """Node service for peer-to-peer operations
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -34,117 +35,44 @@ class NodeServiceStub(object):
         Args:
             channel: A grpc.Channel.
         """
-        self.SendPrompt = channel.unary_unary(
-                '/node_service.NodeService/SendPrompt',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.PromptRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Tensor.FromString,
-                _registered_method=True)
-        self.SendTensor = channel.unary_unary(
-                '/node_service.NodeService/SendTensor',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TensorRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Tensor.FromString,
-                _registered_method=True)
-        self.SendExample = channel.unary_unary(
-                '/node_service.NodeService/SendExample',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ExampleRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Loss.FromString,
-                _registered_method=True)
-        self.GetInferenceResult = channel.unary_unary(
-                '/node_service.NodeService/GetInferenceResult',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetInferenceResultRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.InferenceResult.FromString,
-                _registered_method=True)
-        self.CollectTopology = channel.unary_unary(
-                '/node_service.NodeService/CollectTopology',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.CollectTopologyRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Topology.FromString,
-                _registered_method=True)
-        self.SendResult = channel.unary_unary(
-                '/node_service.NodeService/SendResult',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.SendResultRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Empty.FromString,
-                _registered_method=True)
-        self.SendOpaqueStatus = channel.unary_unary(
-                '/node_service.NodeService/SendOpaqueStatus',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.SendOpaqueStatusRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Empty.FromString,
-                _registered_method=True)
-        self.HealthCheck = channel.unary_unary(
-                '/node_service.NodeService/HealthCheck',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.FromString,
-                _registered_method=True)
         self.GetShardStatus = channel.unary_unary(
-                '/node_service.NodeService/GetShardStatus',
-                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusRequest.SerializeToString,
-                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusResponse.FromString,
+                '/exo.networking.grpc.NodeService/GetShardStatus',
+                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Shard.SerializeToString,
+                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardStatus.FromString,
                 _registered_method=True)
         self.TransferShard = channel.stream_stream(
-                '/node_service.NodeService/TransferShard',
+                '/exo.networking.grpc.NodeService/TransferShard',
                 request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.SerializeToString,
                 response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.FromString,
+                _registered_method=True)
+        self.HealthCheck = channel.unary_unary(
+                '/exo.networking.grpc.NodeService/HealthCheck',
+                request_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.SerializeToString,
+                response_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
 
 
 class NodeServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
-
-    def SendPrompt(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def SendTensor(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def SendExample(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def GetInferenceResult(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def CollectTopology(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def SendResult(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def SendOpaqueStatus(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
-
-    def HealthCheck(self, request, context):
-        """Missing associated documentation comment in .proto file."""
-        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
-        context.set_details('Method not implemented!')
-        raise NotImplementedError('Method not implemented!')
+    """Node service for peer-to-peer operations
+    """
 
     def GetShardStatus(self, request, context):
-        """Missing associated documentation comment in .proto file."""
+        """Check if a shard is available locally
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
     def TransferShard(self, request_iterator, context):
-        """Missing associated documentation comment in .proto file."""
+        """Transfer a shard to another node
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def HealthCheck(self, request, context):
+        """Health check
+        """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
@@ -152,282 +80,32 @@ class NodeServiceServicer(object):
 
 def add_NodeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
-            'SendPrompt': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendPrompt,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.PromptRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Tensor.SerializeToString,
-            ),
-            'SendTensor': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendTensor,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TensorRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Tensor.SerializeToString,
-            ),
-            'SendExample': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendExample,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ExampleRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Loss.SerializeToString,
-            ),
-            'GetInferenceResult': grpc.unary_unary_rpc_method_handler(
-                    servicer.GetInferenceResult,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetInferenceResultRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.InferenceResult.SerializeToString,
-            ),
-            'CollectTopology': grpc.unary_unary_rpc_method_handler(
-                    servicer.CollectTopology,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.CollectTopologyRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Topology.SerializeToString,
-            ),
-            'SendResult': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendResult,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.SendResultRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Empty.SerializeToString,
-            ),
-            'SendOpaqueStatus': grpc.unary_unary_rpc_method_handler(
-                    servicer.SendOpaqueStatus,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.SendOpaqueStatusRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Empty.SerializeToString,
-            ),
-            'HealthCheck': grpc.unary_unary_rpc_method_handler(
-                    servicer.HealthCheck,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.SerializeToString,
-            ),
             'GetShardStatus': grpc.unary_unary_rpc_method_handler(
                     servicer.GetShardStatus,
-                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusRequest.FromString,
-                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusResponse.SerializeToString,
+                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.Shard.FromString,
+                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardStatus.SerializeToString,
             ),
             'TransferShard': grpc.stream_stream_rpc_method_handler(
                     servicer.TransferShard,
                     request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.FromString,
                     response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.SerializeToString,
             ),
+            'HealthCheck': grpc.unary_unary_rpc_method_handler(
+                    servicer.HealthCheck,
+                    request_deserializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.FromString,
+                    response_serializer=exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.SerializeToString,
+            ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
-            'node_service.NodeService', rpc_method_handlers)
+            'exo.networking.grpc.NodeService', rpc_method_handlers)
     server.add_generic_rpc_handlers((generic_handler,))
-    server.add_registered_method_handlers('node_service.NodeService', rpc_method_handlers)
+    server.add_registered_method_handlers('exo.networking.grpc.NodeService', rpc_method_handlers)
 
 
  # This class is part of an EXPERIMENTAL API.
 class NodeService(object):
-    """Missing associated documentation comment in .proto file."""
-
-    @staticmethod
-    def SendPrompt(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/SendPrompt',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.PromptRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.Tensor.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SendTensor(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/SendTensor',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.TensorRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.Tensor.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SendExample(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/SendExample',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.ExampleRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.Loss.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def GetInferenceResult(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/GetInferenceResult',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.GetInferenceResultRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.InferenceResult.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def CollectTopology(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/CollectTopology',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.CollectTopologyRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.Topology.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SendResult(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/SendResult',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.SendResultRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.Empty.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def SendOpaqueStatus(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/SendOpaqueStatus',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.SendOpaqueStatusRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.Empty.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
-
-    @staticmethod
-    def HealthCheck(request,
-            target,
-            options=(),
-            channel_credentials=None,
-            call_credentials=None,
-            insecure=False,
-            compression=None,
-            wait_for_ready=None,
-            timeout=None,
-            metadata=None):
-        return grpc.experimental.unary_unary(
-            request,
-            target,
-            '/node_service.NodeService/HealthCheck',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.FromString,
-            options,
-            channel_credentials,
-            insecure,
-            call_credentials,
-            compression,
-            wait_for_ready,
-            timeout,
-            metadata,
-            _registered_method=True)
+    """Node service for peer-to-peer operations
+    """
 
     @staticmethod
     def GetShardStatus(request,
@@ -443,9 +121,9 @@ class NodeService(object):
         return grpc.experimental.unary_unary(
             request,
             target,
-            '/node_service.NodeService/GetShardStatus',
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusRequest.SerializeToString,
-            exo_dot_networking_dot_grpc_dot_node__service__pb2.GetShardStatusResponse.FromString,
+            '/exo.networking.grpc.NodeService/GetShardStatus',
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.Shard.SerializeToString,
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardStatus.FromString,
             options,
             channel_credentials,
             insecure,
@@ -470,9 +148,36 @@ class NodeService(object):
         return grpc.experimental.stream_stream(
             request_iterator,
             target,
-            '/node_service.NodeService/TransferShard',
+            '/exo.networking.grpc.NodeService/TransferShard',
             exo_dot_networking_dot_grpc_dot_node__service__pb2.ShardChunk.SerializeToString,
             exo_dot_networking_dot_grpc_dot_node__service__pb2.TransferStatus.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def HealthCheck(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/exo.networking.grpc.NodeService/HealthCheck',
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckRequest.SerializeToString,
+            exo_dot_networking_dot_grpc_dot_node__service__pb2.HealthCheckResponse.FromString,
             options,
             channel_credentials,
             insecure,

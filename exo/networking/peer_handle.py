@@ -1,60 +1,31 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple, List
-import numpy as np
-from exo.inference.shard import Shard
-from exo.topology.device_capabilities import DeviceCapabilities
-from exo.topology.topology import Topology
-
+from typing import Any
 
 class PeerHandle(ABC):
-  @abstractmethod
-  def id(self) -> str:
-    pass
+    """Abstract base class for peer handles."""
 
-  @abstractmethod
-  def addr(self) -> str:
-    pass
+    def __init__(self, peer_id: str, addr: str, description: str, device_capabilities: Any):
+        self.peer_id = peer_id
+        self.addr = addr
+        self.description = description
+        self.device_capabilities = device_capabilities
 
-  @abstractmethod
-  def description(self) -> str:
-    pass
+    @abstractmethod
+    async def connect(self) -> None:
+        """Connect to the peer."""
+        pass
 
-  @abstractmethod
-  def device_capabilities(self) -> DeviceCapabilities:
-    pass
+    @abstractmethod
+    async def disconnect(self) -> None:
+        """Disconnect from the peer."""
+        pass
 
-  @abstractmethod
-  async def connect(self) -> None:
-    pass
+    @abstractmethod
+    async def is_connected(self) -> bool:
+        """Check if the peer is connected."""
+        pass
 
-  @abstractmethod
-  async def is_connected(self) -> bool:
-    pass
-
-  @abstractmethod
-  async def disconnect(self) -> None:
-    pass
-
-  @abstractmethod
-  async def health_check(self) -> bool:
-    pass
-
-  @abstractmethod
-  async def send_prompt(self, shard: Shard, prompt: str, request_id: Optional[str] = None) -> Optional[np.array]:
-    pass
-
-  @abstractmethod
-  async def send_tensor(self, shard: Shard, tensor: np.array, request_id: Optional[str] = None) -> Optional[np.array]:
-    pass
-
-  @abstractmethod
-  async def send_result(self, request_id: str, result: List[int], is_finished: bool) -> None:
-    pass
-
-  @abstractmethod
-  async def get_inference_result(self, request_id: str) -> Tuple[Optional[np.ndarray], bool]:
-    pass
-
-  @abstractmethod
-  async def collect_topology(self, visited: set[str], max_depth: int) -> Topology:
-    pass
+    @abstractmethod
+    async def health_check(self) -> bool:
+        """Check if the peer is healthy."""
+        pass

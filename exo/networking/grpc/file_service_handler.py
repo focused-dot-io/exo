@@ -1,11 +1,15 @@
 import asyncio
 from pathlib import Path
 from typing import Optional, AsyncIterator
-from exo.inference.shard import Shard
 from exo.networking.grpc.file_service_pb2 import (
     GetShardStatusRequest, GetShardStatusResponse,
-    ShardChunk, TransferStatus
 )
+from exo.networking.grpc.node_service_pb2 import (
+    ShardChunk,
+    TransferStatus,
+    Shard
+)
+from exo.download.shard import Shard as ShardModel
 from exo.networking.grpc.file_service_pb2_grpc import FileServiceServicer
 from exo.download.hf.hf_helpers import get_local_snapshot_dir, get_weight_map, get_allow_patterns
 from exo.models import get_repo
@@ -20,7 +24,7 @@ class FileServiceHandler(FileServiceServicer):
         context
     ) -> GetShardStatusResponse:
         try:
-            shard = Shard.from_proto(request.shard)
+            shard = ShardModel.from_proto(request.shard)
             repo_name = get_repo(shard.model_id, request.inference_engine_name)
             
             if DEBUG >= 2:
@@ -84,7 +88,7 @@ class FileServiceHandler(FileServiceServicer):
                 return
                 
             metadata = request.metadata
-            shard = Shard.from_proto(metadata.shard)
+            shard = ShardModel.from_proto(metadata.shard)
             repo_name = get_repo(shard.model_id, metadata.inference_engine_name)
             
             if DEBUG >= 2:

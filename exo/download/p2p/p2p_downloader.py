@@ -156,7 +156,21 @@ class P2PShardDownloader(ShardDownloader):
         final_snapshot_dir = final_model_dir / "snapshots" / "current"
         final_safetensors = final_snapshot_dir / "model.safetensors"
         
-        # Check if the complete model structure exists
+        # Check if we already have the file locally
+        if final_safetensors.exists():
+            try:
+                # Verify file integrity
+                with open(final_safetensors, 'rb') as f:
+                    header = f.read(8)
+                    if len(header) == 8:
+                        if DEBUG >= 2:
+                            print(f"[P2P Download] Found valid local file at {final_safetensors}")
+                        return final_snapshot_dir
+            except Exception as e:
+                if DEBUG >= 2:
+                    print(f"[P2P Download] Error checking local file: {e}")
+                    
+        # Check if shard already exists locally with complete structure
         def check_model_structure() -> bool:
             try:
                 if not all(p.exists() for p in [
@@ -240,7 +254,7 @@ class P2PShardDownloader(ShardDownloader):
                     print(f"[P2P Download] Attempting download from peer {peer}")
                     
                 download_task = asyncio.create_task(
-                    self._download_shard(shard, inference_engine_name, peer)
+                    self._download_shard(shard, inference_engine_name, peer, status.file_size)
                 )
                 self.active_downloads[shard] = download_task
                 
@@ -272,15 +286,17 @@ class P2PShardDownloader(ShardDownloader):
         raise PeerConnectionError(f"All peers failed to download shard {shard}. Last error: {last_error}")
 
     async def _download_shard(
-        self, shard: Shard, inference_engine_name: str, peer: PeerHandle
+        self, shard: Shard, inference_engine_name: str, peer: PeerHandle, file_size: int
     ) -> Path:
         if DEBUG >= 2:
             print(f"[P2P Download] Starting download of shard {shard} from peer {peer}")
+            print(f"[P2P Download] Expected file size: {file_size}")
             
         # Create metadata request
         metadata = ShardChunk.Metadata(
             shard=shard.to_proto(),
-            inference_engine_name=inference_engine_name
+            inference_engine_name=inference_engine_name,
+            total_size=file_size
         )
         initial_request = ShardChunk(metadata=metadata)
 
@@ -319,14 +335,28 @@ class P2PShardDownloader(ShardDownloader):
 
             # Create async generator for sending requests
             async def request_generator():
+                # Send initial metadata
                 yield initial_request
-                while True:
-                    # Send acknowledgment for each chunk received
-                    yield TransferStatus(
-                        status=TransferStatus.OK,
-                        bytes_received=0,
-                        error_message=""
-                    )
+                
+                # Wait for acknowledgments
+                async for response in stream:
+                    if isinstance(response, TransferStatus):
+                        if response.status == TransferStatus.ERROR:
+                            error_msg = getattr(response, 'error_message', 'Unknown error')
+                            raise RuntimeError(f"Transfer failed: {error_msg}")
+                        yield TransferStatus(
+                            status=TransferStatus.OK,
+                            bytes_received=response.bytes_received,
+                            error_message=""
+                        )
+                    elif isinstance(response, ShardChunk):
+                        if response.HasField('chunk_data'):
+                            bytes_received = response.offset + len(response.chunk_data)
+                            yield TransferStatus(
+                                status=TransferStatus.OK,
+                                bytes_received=bytes_received,
+                                error_message=""
+                            )
 
             # Start transfer stream with timeout
             async with asyncio.timeout(CONNECT_TIMEOUT):
@@ -347,7 +377,7 @@ class P2PShardDownloader(ShardDownloader):
                     total_files=1,
                     downloaded_bytes=0,
                     downloaded_bytes_this_session=0,
-                    total_bytes=0,  # Will be updated with first chunk
+                    total_bytes=file_size,
                     overall_speed=0,
                     overall_eta=timedelta(seconds=0),
                     file_progress={},
@@ -357,7 +387,6 @@ class P2PShardDownloader(ShardDownloader):
                 with open(temp_path, "wb") as f:
                     start_time = asyncio.get_event_loop().time()
                     async with asyncio.timeout(TRANSFER_TIMEOUT):
-                        total_size = 0
                         bytes_received = 0
                         
                         async for response in stream:
@@ -367,11 +396,6 @@ class P2PShardDownloader(ShardDownloader):
                                 if response.status == TransferStatus.ERROR:
                                     error_msg = getattr(response, 'error_message', 'Unknown error')
                                     raise RuntimeError(f"Transfer failed: {error_msg}")
-                                # First status message contains total size
-                                if total_size == 0:
-                                    total_size = response.bytes_received
-                                    if DEBUG >= 2:
-                                        print(f"[P2P Download] Got total size: {total_size}")
                                 continue
                                 
                             if not isinstance(response, ShardChunk):

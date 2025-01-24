@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Optional
-import asyncio
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -9,7 +8,6 @@ from mlx_lm.models.cache import KVCache
 from mlx_lm.models.deepseek_v3 import ModelArgs, DeepseekV3DecoderLayer
 from .base import IdentityBlock
 from exo.inference.shard import Shard
-from exo.helpers import DEBUG
 
 
 @dataclass
@@ -83,19 +81,11 @@ class Model(nn.Module):
         if self.args.shard.is_last_layer():
             self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-    async def __call__(
+    def __call__(
         self,
         inputs: mx.array,
         cache: Optional[KVCache] = None,
     ):
-        try:
-            if hasattr(self, '_ensure_connected'):
-                await self._ensure_connected()
-        except Exception as e:
-            if DEBUG >= 2:
-                print(f"Warning: Failed to establish gRPC connection: {str(e)}")
-            pass
-
         out = self.model(inputs, cache)
         if self.args.shard.is_last_layer():
             return self.lm_head(out)
@@ -114,29 +104,4 @@ class Model(nn.Module):
             elif self.args.shard.is_last_layer() and (key.startswith('model.norm') or key.startswith('lm_head')):
                 shard_state_dict[key] = value
 
-        for l in range(self.args.num_hidden_layers):
-            prefix = f"model.layers.{l}"
-            for n, m in [("w1", "gate_proj"), ("w2", "down_proj"), ("w3", "up_proj")]:
-                for k in ["weight", "scales", "biases"]:
-                    if f"{prefix}.mlp.experts.0.{m}.{k}" in shard_state_dict:
-                        to_join = [shard_state_dict.pop(f"{prefix}.mlp.experts.{e}.{m}.{k}") for e in range(self.args.n_routed_experts)]
-                        shard_state_dict[f"{prefix}.mlp.switch_mlp.{m}.{k}"] = mx.stack(to_join)
-
-        # Remove multi-token prediction layer
-        shard_state_dict = {k: v for k, v in shard_state_dict.items() if not k.startswith("model.layers.61")}
         return shard_state_dict
-
-    @property
-    def layers(self):
-        return self.model.layers
-
-    @property
-    def head_dim(self):
-        return (
-            self.args.qk_nope_head_dim + self.args.qk_rope_head_dim,
-            self.args.v_head_dim,
-        )
-
-    @property
-    def n_kv_heads(self):
-        return self.args.num_key_value_heads

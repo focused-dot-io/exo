@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from typing import Optional
+import asyncio
 
 import mlx.core as mx
 import mlx.nn as nn
@@ -8,6 +9,7 @@ from mlx_lm.models.cache import KVCache
 from mlx_lm.models.deepseek_v3 import ModelArgs, DeepseekV3DecoderLayer
 from .base import IdentityBlock
 from exo.inference.shard import Shard
+from exo.helpers import DEBUG
 
 
 @dataclass
@@ -81,11 +83,19 @@ class Model(nn.Module):
         if self.args.shard.is_last_layer():
             self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-    def __call__(
+    async def __call__(
         self,
         inputs: mx.array,
         cache: Optional[KVCache] = None,
     ):
+        try:
+            if hasattr(self, '_ensure_connected'):
+                await self._ensure_connected()
+        except Exception as e:
+            if DEBUG >= 2:
+                print(f"Warning: Failed to establish gRPC connection: {str(e)}")
+            pass
+
         out = self.model(inputs, cache)
         if self.args.shard.is_last_layer():
             return self.lm_head(out)

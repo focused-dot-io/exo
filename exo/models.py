@@ -2,6 +2,18 @@ from exo.inference.shard import Shard
 from typing import Optional, List
 
 model_cards = {
+  "deepseek-r1-distill-qwen-1.5b": {
+    "layers": 61,
+    "repo": {
+       "MLXDynamicShardInferenceEngine": "mlx-community/deepseek-r1-distill-qwen-1.5b",
+    },
+  },
+  "deepseek-v3": {
+    "layers": 61,
+    "repo": {
+       "MLXDynamicShardInferenceEngine": "mlx-community/DeepSeek-V3-4bit",
+    },
+  },
   ### llama
   "llama-3.3-70b": {
     "layers": 80,
@@ -121,6 +133,8 @@ model_cards = {
 }
 
 pretty_name = {
+  "deepseek-r1-distill-qwen-1.5b": "DeepSeek R1 Distill Qwen 1.5B",
+  "deepseek-v3": "DeepSeek V3",
   "llama-3.3-70b": "Llama 3.3 70B",
   "llama-3.2-1b": "Llama 3.2 1B",
   "llama-3.2-1b-8bit": "Llama 3.2 1B (8-bit)",

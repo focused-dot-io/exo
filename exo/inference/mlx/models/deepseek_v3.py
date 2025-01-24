@@ -104,4 +104,34 @@ class Model(nn.Module):
             elif self.args.shard.is_last_layer() and (key.startswith('model.norm') or key.startswith('lm_head')):
                 shard_state_dict[key] = value
 
+        # Add MoE expert parameter handling
+        for l in range(self.args.num_hidden_layers):
+            prefix = f"model.layers.{l}"
+            for n, m in [("w1", "gate_proj"), ("w2", "down_proj"), ("w3", "up_proj")]:
+                for k in ["weight", "scales", "biases"]:
+                    expert_key = f"{prefix}.mlp.experts.0.{m}.{k}"
+                    if expert_key in shard_state_dict:
+                        # Stack experts for switch mlp
+                        to_join = [
+                            shard_state_dict.pop(f"{prefix}.mlp.experts.{e}.{m}.{k}")
+                            for e in range(self.args.n_routed_experts)
+                        ]
+                        shard_state_dict[f"{prefix}.mlp.switch_mlp.{m}.{k}"] = mx.stack(to_join)
+
         return shard_state_dict
+
+    # Add required distributed inference properties
+    @property
+    def layers(self):
+        return self.model.layers
+
+    @property
+    def head_dim(self):
+        return (
+            self.args.qk_nope_head_dim + self.args.qk_rope_head_dim,
+            self.args.v_head_dim,
+        )
+
+    @property
+    def n_kv_heads(self):
+        return self.args.num_key_value_heads

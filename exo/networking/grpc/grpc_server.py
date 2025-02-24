@@ -188,14 +188,24 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
         required_files = ["config.json", "tokenizer.json", "tokenizer_config.json"]
         has_required_files = any(file in available_files for file in required_files)
         
-        # Consider the model complete if it has required config files and at least one weight file
-        is_complete = has_required_files and any(
+        # Look for model weight files (could be in multiple formats)
+        has_weight_file = any(
             file.endswith(".safetensors") or 
             file.endswith(".bin") or
             file.endswith(".pt") or
             file.endswith(".gguf")
             for file in available_files
         )
+        
+        # Log details about what we found for debugging
+        if DEBUG >= 2:
+            print(f"[GRPC SERVER] For model {repo_id}:")
+            print(f"[GRPC SERVER]   Has required files: {has_required_files}")
+            print(f"[GRPC SERVER]   Has weight file: {has_weight_file}")
+            print(f"[GRPC SERVER]   Available files: {available_files}")
+        
+        # Consider the model complete if it has required config files and at least one weight file
+        is_complete = has_required_files and has_weight_file
       
       return node_service_pb2.HasModelResponse(
         has_model=has_model,

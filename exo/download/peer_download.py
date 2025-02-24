@@ -33,6 +33,57 @@ class PeerShardDownloader(ShardDownloader):
         self._coordinator_id = None
         self.downloading_models: Set[str] = set()
         
+    async def _wait_for_model_on_coordinator(self, coordinator_peer, repo_id, revision="main", 
+                                         max_wait_seconds=60, poll_interval_seconds=1.0):
+        """Wait for the coordinator node to download a model
+        
+        Args:
+            coordinator_peer: The peer handle for the coordinator node
+            repo_id: The repo ID to wait for
+            revision: The model revision to wait for (default: main)
+            max_wait_seconds: Maximum time to wait in seconds (default: 60)
+            poll_interval_seconds: How often to check if model is available (default: 1.0)
+            
+        Returns:
+            bool: True if model was found on coordinator, False if timed out
+        """
+        print(f"[PEER DOWNLOAD] Waiting for coordinator {coordinator_peer.id()} to download model {repo_id}")
+        
+        start_time = time.time()
+        attempts = 0
+        
+        while time.time() - start_time < max_wait_seconds:
+            attempts += 1
+            try:
+                if not await coordinator_peer.is_connected():
+                    print(f"[PEER DOWNLOAD] Warning: Coordinator peer {coordinator_peer.id()} is not connected")
+                    await asyncio.sleep(poll_interval_seconds)
+                    continue
+                    
+                # Poll to see if coordinator has the model now
+                has_model_response = await coordinator_peer.has_model(repo_id, revision)
+                
+                if has_model_response.has_model:
+                    complete_status = "complete" if has_model_response.is_complete else "incomplete"
+                    print(f"[PEER DOWNLOAD] Found model {repo_id} on coordinator (status: {complete_status})")
+                    return True
+                    
+                # If we're debugging, log poll attempts
+                if DEBUG >= 2 or attempts % 5 == 0:  # Log every 5 attempts
+                    elapsed = time.time() - start_time
+                    print(f"[PEER DOWNLOAD] Waiting for model {repo_id} on coordinator (elapsed: {elapsed:.1f}s, attempt: {attempts})")
+                    
+            except Exception as e:
+                print(f"[PEER DOWNLOAD] Error checking for model on coordinator: {e}")
+                if DEBUG >= 2:
+                    traceback.print_exc()
+            
+            # Wait before polling again
+            await asyncio.sleep(poll_interval_seconds)
+        
+        print(f"[PEER DOWNLOAD] Timed out waiting for coordinator to download model {repo_id} after {max_wait_seconds} seconds")
+        return False
+        
     @staticmethod
     def filter_repo_objects(objects, allow_patterns=None, key=None):
         """Filter repository objects based on allow patterns"""
@@ -263,11 +314,32 @@ class PeerShardDownloader(ShardDownloader):
             return await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
             
         # Otherwise I should try to download from peers
-        if DEBUG >= 1:
-            print(f"[PEER DOWNLOAD] I am NOT the coordinator. My ID: {self.peers[0].id()}, Coordinator: {self._coordinator_id}")
-            print(f"[PEER DOWNLOAD] Will try to download {repo_id} from peers")
+        print(f"[PEER DOWNLOAD] I am NOT the coordinator. My ID: {self.peers[0].id()}, Coordinator: {self._coordinator_id}")
+        print(f"[PEER DOWNLOAD] Will try to download {repo_id} from peers")
+        
+        # Find the coordinator peer
+        coordinator_peer = None
+        for peer in self.peers:
+            if peer.id() == self._coordinator_id:
+                coordinator_peer = peer
+                break
+                
+        if coordinator_peer:
+            # First check if coordinator already has the model
+            has_model_response = await coordinator_peer.has_model(repo_id)
+            coordinator_has_model = has_model_response.has_model
             
-        # Try to find a peer that has this model
+            if not coordinator_has_model:
+                # Wait for coordinator to download the model
+                print(f"[PEER DOWNLOAD] Coordinator does not have model {repo_id} yet, waiting for it to download...")
+                
+                # Use our wait method to poll for coordinator to complete download
+                wait_success = await self._wait_for_model_on_coordinator(coordinator_peer, repo_id)
+                
+                if wait_success:
+                    print(f"[PEER DOWNLOAD] Coordinator now has model {repo_id}, will download from coordinator")
+        
+        # Try to find a peer that has this model (preferably the coordinator)
         peer = await self.find_peer_with_model(repo_id)
         
         if peer:

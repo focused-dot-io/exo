@@ -506,15 +506,67 @@ class Node:
     self.shard_downloader.set_peers(list(self.peers))
     
     # If we aren't the coordinator, wait a moment for discovery to complete
-    await self._coordinator_wait_if_needed(is_coordinator, len(self.peers) > 0)
+    await self._coordinator_wait_for_peer_discovery(is_coordinator, len(self.peers) > 0)
       
   @staticmethod
-  async def _coordinator_wait_if_needed(is_coordinator: bool, has_peers: bool, sleep_func=asyncio.sleep):
-    """Helper method for waiting if not the coordinator - factored out for testing"""
+  async def _coordinator_wait_for_peer_discovery(is_coordinator: bool, has_peers: bool, sleep_func=asyncio.sleep):
+    """Helper method for waiting if not the coordinator - for peer discovery completion"""
     if not is_coordinator and has_peers:
       wait_time = 2.0
       print(f"[PEER DOWNLOAD] Not the coordinator - waiting {wait_time}s for peer discovery to complete")
       await sleep_func(wait_time)
+      
+  async def _wait_for_model_download(self, coordinator_peer, repo_id, revision="main", max_wait_seconds=60, 
+                                    poll_interval_seconds=1.0, sleep_func=asyncio.sleep):
+    """Wait for the coordinator node to download a model
+    
+    Args:
+        coordinator_peer: The peer handle for the coordinator node
+        repo_id: The repo ID to wait for
+        revision: The model revision to wait for (default: main)
+        max_wait_seconds: Maximum time to wait in seconds (default: 60)
+        poll_interval_seconds: How often to check if model is available (default: 1.0)
+        sleep_func: The sleep function to use (for testing)
+        
+    Returns:
+        bool: True if model was found on coordinator, False if timed out
+    """
+    print(f"[PEER DOWNLOAD] Waiting for coordinator {coordinator_peer.id()} to download model {repo_id}")
+    
+    start_time = time.time()
+    attempts = 0
+    
+    while time.time() - start_time < max_wait_seconds:
+      attempts += 1
+      try:
+        if not await coordinator_peer.is_connected():
+          print(f"[PEER DOWNLOAD] Warning: Coordinator peer {coordinator_peer.id()} is not connected")
+          await sleep_func(poll_interval_seconds)
+          continue
+          
+        # Poll to see if coordinator has the model now
+        has_model_response = await coordinator_peer.has_model(repo_id, revision)
+        
+        if has_model_response.has_model:
+          complete_status = "complete" if has_model_response.is_complete else "incomplete"
+          print(f"[PEER DOWNLOAD] Found model {repo_id} on coordinator (status: {complete_status})")
+          return True
+          
+        # If we're debugging, log poll attempts
+        if DEBUG >= 2 or attempts % 5 == 0:  # Log every 5 attempts
+          elapsed = time.time() - start_time
+          print(f"[PEER DOWNLOAD] Waiting for model {repo_id} on coordinator (elapsed: {elapsed:.1f}s, attempt: {attempts})")
+          
+      except Exception as e:
+        print(f"[PEER DOWNLOAD] Error checking for model on coordinator: {e}")
+        if DEBUG >= 2:
+          traceback.print_exc()
+      
+      # Wait before polling again
+      await sleep_func(poll_interval_seconds)
+    
+    print(f"[PEER DOWNLOAD] Timed out waiting for coordinator to download model {repo_id} after {max_wait_seconds} seconds")
+    return False
       
   async def update_peers(self, wait_for_peers: int = 0) -> bool:
     next_peers = await self.discovery.discover_peers(wait_for_peers)

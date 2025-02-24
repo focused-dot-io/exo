@@ -63,6 +63,9 @@ class Node:
     await self.collect_topology(set())
     if DEBUG >= 2: print(f"Collected topology: {self.topology}")
     asyncio.create_task(self.periodic_topology_collection(2.0))
+    
+    # Setup download coordinator - first node discovered becomes the coordinator
+    await self.setup_peer_download_coordinator()
 
   async def stop(self) -> None:
     await self.discovery.stop()
@@ -467,6 +470,33 @@ class Node:
     shards = map_partitions_to_shards(partitions, base_shard.n_layers, base_shard.model_id)
     return shards[index]
 
+  async def setup_peer_download_coordinator(self):
+    """Setup the peer download coordinator.
+    
+    The node with the lowest ID will be the download coordinator,
+    responsible for downloading models from HuggingFace and sharing
+    them with other nodes.
+    """
+    # Skip if we're not using a PeerShardDownloader
+    if not hasattr(self.shard_downloader, 'set_coordinator_id'):
+      if DEBUG >= 2:
+        print("Not using PeerShardDownloader, skipping coordinator setup")
+      return
+      
+    # Find the node with the lowest ID (alphanumeric sort)
+    all_node_ids = [self.id] + [peer.id() for peer in self.peers]
+    all_node_ids.sort()  # Sort alphanumerically
+    coordinator_id = all_node_ids[0]
+    
+    if DEBUG >= 1:
+      print(f"Setting model download coordinator to {coordinator_id}")
+      
+    # Set the coordinator ID in the downloader
+    self.shard_downloader.set_coordinator_id(coordinator_id)
+    
+    # Update the peer list in the PeerShardDownloader
+    self.shard_downloader.set_peers(list(self.peers))
+      
   async def update_peers(self, wait_for_peers: int = 0) -> bool:
     next_peers = await self.discovery.discover_peers(wait_for_peers)
     current_peer_ids = {peer.id() for peer in self.peers}
@@ -516,6 +546,15 @@ class Node:
       if failed_connects: print(f"Failed to connect peers: {_pretty(failed_connects)}")
 
     self.peers = next_peers
+    
+    # Update the peer list in the PeerShardDownloader if it's being used
+    if hasattr(self.shard_downloader, 'set_peers'):
+      self.shard_downloader.set_peers(next_peers)
+      
+    # Re-setup coordinator if peers have changed
+    if len(peers_added) > 0 or len(peers_removed) > 0 or len(peers_updated) > 0:
+      await self.setup_peer_download_coordinator()
+      
     return len(peers_added) > 0 or len(peers_removed) > 0 or len(peers_updated) > 0
 
   async def select_best_inference_engine(self):

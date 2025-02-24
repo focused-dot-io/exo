@@ -153,6 +153,158 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
 
   async def HealthCheck(self, request, context):
     return node_service_pb2.HealthCheckResponse(is_healthy=True)
+    
+  async def HasModel(self, request, context):
+    """Check if this node has a given model downloaded"""
+    import os
+    import aiofiles.os as aios
+    from pathlib import Path
+    from exo.download.new_shard_download import ensure_downloads_dir
+    
+    try:
+      repo_id = request.repo_id
+      revision = request.revision
+      
+      # Convert repo_id to local filesystem path
+      model_dir = await ensure_downloads_dir() / repo_id.replace("/", "--")
+      
+      has_model = await aios.path.exists(model_dir)
+      available_files = []
+      is_complete = False
+      
+      if has_model:
+        # Get all files in the model directory
+        available_files = []
+        for root, dirs, files in os.walk(model_dir):
+          rel_root = str(Path(root).relative_to(model_dir))
+          for file in files:
+            if not file.endswith(".partial"):  # Skip partial downloads
+              if rel_root == ".":
+                available_files.append(file)
+              else:
+                available_files.append(os.path.join(rel_root, file))
+                
+        # Consider the model complete if it has files
+        # A more sophisticated approach would check for specific model files
+        is_complete = len(available_files) > 0
+      
+      return node_service_pb2.HasModelResponse(
+        has_model=has_model,
+        is_complete=is_complete,
+        available_files=available_files
+      )
+    except Exception as e:
+      import traceback
+      traceback.print_exc()
+      context.abort(grpc.StatusCode.INTERNAL, str(e))
+      
+  async def GetModelFileList(self, request, context):
+    """Return a list of files for a given model"""
+    import os
+    import aiofiles.os as aios
+    from pathlib import Path
+    from exo.download.new_shard_download import ensure_downloads_dir
+    
+    try:
+      repo_id = request.repo_id
+      revision = request.revision
+      allow_patterns = list(request.allow_patterns)
+      
+      # Convert repo_id to local filesystem path
+      model_dir = await ensure_downloads_dir() / repo_id.replace("/", "--")
+      
+      if not await aios.path.exists(model_dir):
+        return node_service_pb2.ModelFileListResponse(files=[])
+        
+      # Get all files in the model directory
+      files = []
+      for root, dirs, filenames in os.walk(model_dir):
+        rel_root = Path(root).relative_to(model_dir)
+        for filename in filenames:
+          if filename.endswith(".partial"):
+            continue  # Skip partial downloads
+            
+          file_path = os.path.join(str(rel_root), filename) if str(rel_root) != "." else filename
+          
+          # Apply pattern filtering if patterns are provided
+          if allow_patterns and not any(file_path.startswith(pattern.strip("*")) for pattern in allow_patterns):
+            if not any(pattern == "*" for pattern in allow_patterns):
+              continue
+          
+          # Get file size
+          file_stat = await aios.stat(Path(root) / filename)
+          file_size = file_stat.st_size
+          
+          # Here we could calculate file hash but it's expensive
+          # For now we'll return an empty hash
+          file_hash = ""
+          
+          files.append(node_service_pb2.ModelFileInfo(
+            path=file_path,
+            size=file_size,
+            hash=file_hash
+          ))
+      
+      return node_service_pb2.ModelFileListResponse(files=files)
+    except Exception as e:
+      import traceback
+      traceback.print_exc()
+      context.abort(grpc.StatusCode.INTERNAL, str(e))
+      
+  async def GetModelFile(self, request, context):
+    """Stream a model file in chunks"""
+    import os
+    import aiofiles
+    import aiofiles.os as aios
+    from pathlib import Path
+    from exo.download.new_shard_download import ensure_downloads_dir
+    
+    try:
+      repo_id = request.repo_id
+      revision = request.revision
+      file_path = request.file_path
+      offset = request.offset
+      
+      # Convert repo_id to local filesystem path
+      model_dir = await ensure_downloads_dir() / repo_id.replace("/", "--")
+      full_path = model_dir / file_path
+      
+      if not await aios.path.exists(full_path):
+        context.abort(grpc.StatusCode.NOT_FOUND, f"File {file_path} not found")
+        return
+        
+      # Get file size
+      file_stat = await aios.stat(full_path)
+      file_size = file_stat.st_size
+      
+      if offset >= file_size:
+        context.abort(grpc.StatusCode.OUT_OF_RANGE, f"Offset {offset} is beyond file size {file_size}")
+        return
+        
+      # Read and stream file in chunks
+      chunk_size = 1024 * 1024  # 1MB chunks
+      
+      async with aiofiles.open(full_path, 'rb') as f:
+        await f.seek(offset)
+        
+        while True:
+          data = await f.read(chunk_size)
+          if not data:
+            break
+            
+          curr_offset = offset
+          offset += len(data)
+          
+          yield node_service_pb2.FileChunk(
+            data=data,
+            offset=curr_offset,
+            total_size=file_size
+          )
+          
+    except Exception as e:
+      import traceback
+      traceback.print_exc()
+      context.abort(grpc.StatusCode.INTERNAL, str(e))
 
   def deserialize_inference_state(self, inference_state_proto: node_service_pb2.InferenceState) -> dict:
     inference_state = {}

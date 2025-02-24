@@ -69,6 +69,21 @@ class NodeServiceStub(object):
                 request_serializer=node__service__pb2.HealthCheckRequest.SerializeToString,
                 response_deserializer=node__service__pb2.HealthCheckResponse.FromString,
                 _registered_method=True)
+        self.GetModelFileList = channel.unary_unary(
+                '/node_service.NodeService/GetModelFileList',
+                request_serializer=node__service__pb2.ModelFileListRequest.SerializeToString,
+                response_deserializer=node__service__pb2.ModelFileListResponse.FromString,
+                _registered_method=True)
+        self.GetModelFile = channel.unary_stream(
+                '/node_service.NodeService/GetModelFile',
+                request_serializer=node__service__pb2.ModelFileRequest.SerializeToString,
+                response_deserializer=node__service__pb2.FileChunk.FromString,
+                _registered_method=True)
+        self.HasModel = channel.unary_unary(
+                '/node_service.NodeService/HasModel',
+                request_serializer=node__service__pb2.HasModelRequest.SerializeToString,
+                response_deserializer=node__service__pb2.HasModelResponse.FromString,
+                _registered_method=True)
 
 
 class NodeServiceServicer(object):
@@ -116,6 +131,24 @@ class NodeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GetModelFileList(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def GetModelFile(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def HasModel(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_NodeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -153,6 +186,21 @@ def add_NodeServiceServicer_to_server(servicer, server):
                     servicer.HealthCheck,
                     request_deserializer=node__service__pb2.HealthCheckRequest.FromString,
                     response_serializer=node__service__pb2.HealthCheckResponse.SerializeToString,
+            ),
+            'GetModelFileList': grpc.unary_unary_rpc_method_handler(
+                    servicer.GetModelFileList,
+                    request_deserializer=node__service__pb2.ModelFileListRequest.FromString,
+                    response_serializer=node__service__pb2.ModelFileListResponse.SerializeToString,
+            ),
+            'GetModelFile': grpc.unary_stream_rpc_method_handler(
+                    servicer.GetModelFile,
+                    request_deserializer=node__service__pb2.ModelFileRequest.FromString,
+                    response_serializer=node__service__pb2.FileChunk.SerializeToString,
+            ),
+            'HasModel': grpc.unary_unary_rpc_method_handler(
+                    servicer.HasModel,
+                    request_deserializer=node__service__pb2.HasModelRequest.FromString,
+                    response_serializer=node__service__pb2.HasModelResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -344,6 +392,87 @@ class NodeService(object):
             '/node_service.NodeService/HealthCheck',
             node__service__pb2.HealthCheckRequest.SerializeToString,
             node__service__pb2.HealthCheckResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetModelFileList(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/node_service.NodeService/GetModelFileList',
+            node__service__pb2.ModelFileListRequest.SerializeToString,
+            node__service__pb2.ModelFileListResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GetModelFile(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_stream(
+            request,
+            target,
+            '/node_service.NodeService/GetModelFile',
+            node__service__pb2.ModelFileRequest.SerializeToString,
+            node__service__pb2.FileChunk.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def HasModel(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/node_service.NodeService/HasModel',
+            node__service__pb2.HasModelRequest.SerializeToString,
+            node__service__pb2.HasModelResponse.FromString,
             options,
             channel_credentials,
             insecure,

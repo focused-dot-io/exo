@@ -195,6 +195,77 @@ class GRPCPeerHandle(PeerHandle):
   async def send_opaque_status(self, request_id: str, status: str) -> None:
     request = node_service_pb2.SendOpaqueStatusRequest(request_id=request_id, status=status)
     await self.stub.SendOpaqueStatus(request)
+    
+  async def has_model(self, repo_id: str, revision: str = "main") -> "HasModelResponse":
+    """Check if the peer has a given model repo downloaded"""
+    try:
+      await self._ensure_connected()
+      request = node_service_pb2.HasModelRequest(repo_id=repo_id, revision=revision)
+      response = await asyncio.wait_for(self.stub.HasModel(request), timeout=10.0)
+      
+      from exo.networking.peer_handle import HasModelResponse
+      return HasModelResponse(
+        has_model=response.has_model,
+        is_complete=response.is_complete,
+        available_files=list(response.available_files)
+      )
+    except Exception as e:
+      if DEBUG >= 1:
+        print(f"Error checking if peer {self._id} has model {repo_id}: {e}")
+        import traceback
+        traceback.print_exc()
+      from exo.networking.peer_handle import HasModelResponse
+      return HasModelResponse(has_model=False, is_complete=False)
+    
+  async def get_model_file_list(self, repo_id: str, revision: str = "main", allow_patterns: List[str] = None) -> "ModelFileListResponse":
+    """Get a list of files available for a model repo"""
+    try:
+      await self._ensure_connected()
+      request = node_service_pb2.ModelFileListRequest(
+        repo_id=repo_id,
+        revision=revision,
+        allow_patterns=allow_patterns or []
+      )
+      response = await asyncio.wait_for(self.stub.GetModelFileList(request), timeout=30.0)
+      
+      from exo.networking.peer_handle import ModelFileInfo, ModelFileListResponse
+      files = [
+        ModelFileInfo(path=file.path, size=file.size, hash=file.hash)
+        for file in response.files
+      ]
+      return ModelFileListResponse(files=files)
+    except Exception as e:
+      if DEBUG >= 1:
+        print(f"Error getting file list from peer {self._id} for model {repo_id}: {e}")
+        import traceback
+        traceback.print_exc()
+      from exo.networking.peer_handle import ModelFileListResponse
+      return ModelFileListResponse(files=[])
+    
+  async def get_model_file(self, repo_id: str, revision: str, file_path: str, offset: int = 0) -> "AsyncIterator[FileChunk]":
+    """Get a file from a model repo, streaming it in chunks"""
+    try:
+      await self._ensure_connected()
+      request = node_service_pb2.ModelFileRequest(
+        repo_id=repo_id,
+        revision=revision,
+        file_path=file_path,
+        offset=offset
+      )
+      
+      from exo.networking.peer_handle import FileChunk
+      async for chunk in self.stub.GetModelFile(request):
+        yield FileChunk(
+          data=chunk.data,
+          offset=chunk.offset,
+          total_size=chunk.total_size
+        )
+    except Exception as e:
+      if DEBUG >= 1:
+        print(f"Error getting file {file_path} from peer {self._id} for model {repo_id}: {e}")
+        import traceback
+        traceback.print_exc()
+      raise e
 
   def serialize_inference_state(self, inference_state: dict) -> node_service_pb2.InferenceState:
     proto_inference_state = node_service_pb2.InferenceState()

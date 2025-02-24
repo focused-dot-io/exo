@@ -10,6 +10,9 @@ service NodeService {
   rpc SendResult (SendResultRequest) returns (Empty) {}
   rpc SendOpaqueStatus (SendOpaqueStatusRequest) returns (Empty) {}
   rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse) {}
+  rpc GetModelFileList (ModelFileListRequest) returns (ModelFileListResponse) {}
+  rpc GetModelFile (ModelFileRequest) returns (stream FileChunk) {}
+  rpc HasModel (HasModelRequest) returns (HasModelResponse) {}
 }
 
 message Shard {
@@ -114,3 +117,43 @@ message HealthCheckResponse {
 }
 
 message Empty {}
+
+message ModelFileListRequest {
+  string repo_id = 1;
+  string revision = 2;
+  repeated string allow_patterns = 3;
+}
+
+message ModelFileInfo {
+  string path = 1;
+  int64 size = 2;
+  string hash = 3;
+}
+
+message ModelFileListResponse {
+  repeated ModelFileInfo files = 1;
+}
+
+message ModelFileRequest {
+  string repo_id = 1;
+  string revision = 2;
+  string file_path = 3;
+  int64 offset = 4;
+}
+
+message FileChunk {
+  bytes data = 1;
+  int64 offset = 2;
+  int64 total_size = 3;
+}
+
+message HasModelRequest {
+  string repo_id = 1;
+  string revision = 2;
+}
+
+message HasModelResponse {
+  bool has_model = 1;
+  bool is_complete = 2;
+  repeated string available_files = 3;
+}

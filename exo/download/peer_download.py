@@ -61,26 +61,44 @@ class PeerShardDownloader(ShardDownloader):
     
     async def find_peer_with_model(self, repo_id: str, revision: str = "main") -> Optional[PeerHandle]:
         """Find a peer that has the model we're looking for"""
-        if DEBUG >= 2:
-            print(f"Searching for peer with model: {repo_id}")
+        print(f"[PEER DOWNLOAD] Searching for peer with model: {repo_id}")
             
         best_peer = None
         most_complete = False
         
-        for peer in self.peers:
+        if not self.peers:
+            print(f"[PEER DOWNLOAD] No peers available to search for model {repo_id}")
+            return None
+            
+        print(f"[PEER DOWNLOAD] Checking {len(self.peers)} peers for model {repo_id}")
+        
+        for i, peer in enumerate(self.peers):
             try:
                 if await peer.is_connected():
+                    print(f"[PEER DOWNLOAD] Checking peer {i+1}/{len(self.peers)}: {peer.id()}")
                     # This would call the new HasModel RPC
                     has_model_response = await peer.has_model(repo_id, revision)
                     if has_model_response.has_model:
                         if has_model_response.is_complete:
+                            print(f"[PEER DOWNLOAD] Found peer {peer.id()} with complete model {repo_id}")
                             return peer
                         elif not most_complete:
+                            print(f"[PEER DOWNLOAD] Found peer {peer.id()} with partial model {repo_id}")
                             best_peer = peer
+                    else:
+                        print(f"[PEER DOWNLOAD] Peer {peer.id()} does not have model {repo_id}")
+                else:
+                    print(f"[PEER DOWNLOAD] Peer {peer.id()} is not connected")
             except Exception as e:
-                if DEBUG >= 1:
-                    print(f"Error checking if peer {peer.id()} has model {repo_id}: {e}")
+                print(f"[PEER DOWNLOAD] Error checking if peer {peer.id()} has model {repo_id}: {e}")
+                if DEBUG >= 2:
+                    traceback.print_exc()
                     
+        if best_peer:
+            print(f"[PEER DOWNLOAD] Best peer found is {best_peer.id()} (incomplete model)")
+        else:
+            print(f"[PEER DOWNLOAD] No peers found with model {repo_id}")
+            
         return best_peer
     
     async def download_file_from_peer(
@@ -93,8 +111,7 @@ class PeerShardDownloader(ShardDownloader):
         on_progress: callable
     ) -> Path:
         """Download a single file from a peer"""
-        if DEBUG >= 2:
-            print(f"Downloading {file_path} from peer {peer.id()}")
+        print(f"[PEER DOWNLOAD] Downloading file {file_path} from peer {peer.id()}")
             
         try:
             # Create directory structure
@@ -102,31 +119,44 @@ class PeerShardDownloader(ShardDownloader):
             
             # Check if file already exists
             if await aios.path.exists(target_dir/file_path):
-                if DEBUG >= 3:
-                    print(f"File {file_path} already exists, skipping")
+                print(f"[PEER DOWNLOAD] File {file_path} already exists, skipping")
                 return target_dir/file_path
                 
             partial_path = target_dir/f"{file_path}.partial"
             resume_byte_pos = (await aios.stat(partial_path)).st_size if (await aios.path.exists(partial_path)) else 0
             
+            if resume_byte_pos > 0:
+                print(f"[PEER DOWNLOAD] Resuming download of {file_path} from byte position {resume_byte_pos}")
+            
             # This would call the new GetModelFile RPC to stream file chunks
-            # Here we're just simulating the streaming behavior
+            file_start_time = time.time()
             total_size = 0
             downloaded = resume_byte_pos
             
             async with aiofiles.open(partial_path, 'ab' if resume_byte_pos else 'wb') as f:
                 async for chunk in peer.get_model_file(repo_id, revision, file_path, resume_byte_pos):
+                    chunk_size = len(chunk.data)
                     downloaded += await f.write(chunk.data)
                     total_size = chunk.total_size
                     on_progress(downloaded, total_size)
+                    
+                    # Print progress occasionally but not for every chunk
+                    if DEBUG >= 3 or (downloaded % (10 * 1024 * 1024) < chunk_size): # Print every ~10MB
+                        progress_pct = (downloaded / total_size) * 100 if total_size > 0 else 0
+                        print(f"[PEER DOWNLOAD] Progress: {downloaded/1024/1024:.2f} MB / {total_size/1024/1024:.2f} MB ({progress_pct:.1f}%)")
+            
+            file_download_time = time.time() - file_start_time
+            download_speed_mbps = (downloaded - resume_byte_pos) / 1024 / 1024 / file_download_time if file_download_time > 0 else 0
             
             # Rename from partial to final
             await aios.rename(partial_path, target_dir/file_path)
+            
+            print(f"[PEER DOWNLOAD] Successfully downloaded {file_path} ({downloaded/1024/1024:.2f} MB) in {file_download_time:.2f}s ({download_speed_mbps:.2f} MB/s)")
             return target_dir/file_path
             
         except Exception as e:
-            if DEBUG >= 1:
-                print(f"Error downloading file {file_path} from peer {peer.id()}: {e}")
+            print(f"[PEER DOWNLOAD] Error downloading file {file_path} from peer {peer.id()}: {e}")
+            if DEBUG >= 2:
                 traceback.print_exc()
             raise e
     
@@ -222,39 +252,52 @@ class PeerShardDownloader(ShardDownloader):
             if all_files_exist:
                 return target_dir
         
-        # If I'm the coordinator or we have no peers, download directly
-        if self._coordinator_id == self.peers[0].id() or not self.peers:
-            if DEBUG >= 2:
-                print(f"I'm the coordinator or have no peers, downloading {repo_id} directly")
+        # If I have no peers, download directly
+        if not self.peers:
+            print(f"[PEER DOWNLOAD] No peers available, downloading {repo_id} directly")
             return await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
+            
+        # If I'm the coordinator, download directly
+        if self._coordinator_id and self.peers and self._coordinator_id == self.peers[0].id():
+            print(f"[PEER DOWNLOAD] I am the coordinator node ({self._coordinator_id}), downloading {repo_id} directly")
+            return await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
+            
+        # Otherwise I should try to download from peers
+        if DEBUG >= 1:
+            print(f"[PEER DOWNLOAD] I am NOT the coordinator. My ID: {self.peers[0].id()}, Coordinator: {self._coordinator_id}")
+            print(f"[PEER DOWNLOAD] Will try to download {repo_id} from peers")
             
         # Try to find a peer that has this model
         peer = await self.find_peer_with_model(repo_id)
         
         if peer:
             try:
-                if DEBUG >= 1:
-                    print(f"Downloading {repo_id} from peer {peer.id()}")
+                print(f"[PEER DOWNLOAD] Found peer {peer.id()} that has model {repo_id}")
+                print(f"[PEER DOWNLOAD] Starting download of {repo_id} from peer {peer.id()}")
                     
                 # Track that we're downloading this model
                 self.downloading_models.add(repo_id)
                 
                 # Download from peer
+                download_start = time.time()
                 target_dir = await self.download_model_from_peer(
                     peer, 
                     shard, 
                     inference_engine_name, 
                     self.on_progress
                 )
+                download_time = time.time() - download_start
                 
                 # No longer downloading this model
                 self.downloading_models.remove(repo_id)
                 
+                print(f"[PEER DOWNLOAD] Successfully downloaded {repo_id} from peer {peer.id()} in {download_time:.2f} seconds")
                 return target_dir
                 
             except Exception as e:
-                if DEBUG >= 1:
-                    print(f"Failed to download {repo_id} from peer {peer.id()}, falling back to direct download: {e}")
+                print(f"[PEER DOWNLOAD] Failed to download {repo_id} from peer {peer.id()}, falling back to direct download")
+                print(f"[PEER DOWNLOAD] Error: {e}")
+                if DEBUG >= 2:
                     traceback.print_exc()
                     
                 # No longer downloading this model
@@ -263,10 +306,15 @@ class PeerShardDownloader(ShardDownloader):
         
         # If we got here, either no peer had the model or download from peer failed
         # Fall back to direct download
-        if DEBUG >= 1:
-            print(f"Downloading {repo_id} directly from HuggingFace")
+        print(f"[PEER DOWNLOAD] No peers have {repo_id} or peer download failed")
+        print(f"[PEER DOWNLOAD] Falling back to direct download from HuggingFace")
             
-        return await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
+        direct_download_start = time.time()
+        result = await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
+        direct_download_time = time.time() - direct_download_start
+        
+        print(f"[PEER DOWNLOAD] Direct download of {repo_id} completed in {direct_download_time:.2f} seconds")
+        return result
     
     async def get_shard_download_status(self, inference_engine_name: str) -> AsyncIterator[tuple[Path, RepoProgressEvent]]:
         """Get the download status of all shards"""

@@ -482,20 +482,39 @@ class Node:
       if DEBUG >= 2:
         print("Not using PeerShardDownloader, skipping coordinator setup")
       return
-      
+    
     # Find the node with the lowest ID (alphanumeric sort)
     all_node_ids = [self.id] + [peer.id() for peer in self.peers]
     all_node_ids.sort()  # Sort alphanumerically
     coordinator_id = all_node_ids[0]
     
-    if DEBUG >= 1:
-      print(f"Setting model download coordinator to {coordinator_id}")
-      
+    # Add detailed logging for peer download coordinator
+    is_coordinator = (coordinator_id == self.id)
+    coordinator_status = "I AM the coordinator" if is_coordinator else f"I am NOT the coordinator (coordinator is {coordinator_id})"
+    
+    print(f"[PEER DOWNLOAD] Setting up peer download coordination")
+    print(f"[PEER DOWNLOAD] My node ID: {self.id}")
+    print(f"[PEER DOWNLOAD] All nodes: {all_node_ids}")
+    print(f"[PEER DOWNLOAD] Coordinator selected: {coordinator_id}")
+    print(f"[PEER DOWNLOAD] {coordinator_status}")
+    print(f"[PEER DOWNLOAD] Connected to {len(self.peers)} peers")
+    
     # Set the coordinator ID in the downloader
     self.shard_downloader.set_coordinator_id(coordinator_id)
     
     # Update the peer list in the PeerShardDownloader
     self.shard_downloader.set_peers(list(self.peers))
+    
+    # If we aren't the coordinator, wait a moment for discovery to complete
+    await self._coordinator_wait_if_needed(is_coordinator, len(self.peers) > 0)
+      
+  @staticmethod
+  async def _coordinator_wait_if_needed(is_coordinator: bool, has_peers: bool, sleep_func=asyncio.sleep):
+    """Helper method for waiting if not the coordinator - factored out for testing"""
+    if not is_coordinator and has_peers:
+      wait_time = 2.0
+      print(f"[PEER DOWNLOAD] Not the coordinator - waiting {wait_time}s for peer discovery to complete")
+      await sleep_func(wait_time)
       
   async def update_peers(self, wait_for_peers: int = 0) -> bool:
     next_peers = await self.discovery.discover_peers(wait_for_peers)
@@ -549,6 +568,19 @@ class Node:
     
     # Update the peer list in the PeerShardDownloader if it's being used
     if hasattr(self.shard_downloader, 'set_peers'):
+      # Log peer download details 
+      if len(peers_added) > 0 or len(peers_removed) > 0 or len(peers_updated) > 0:
+        print(f"[PEER DOWNLOAD] Peer list updated! Now connected to {len(next_peers)} peers")
+        if len(next_peers) > 0:
+          print(f"[PEER DOWNLOAD] Peers: {[peer.id() for peer in next_peers]}")
+          if len(peers_added) > 0:
+            print(f"[PEER DOWNLOAD] New peers: {[peer.id() for peer in peers_added]}")
+          if len(peers_removed) > 0:
+            print(f"[PEER DOWNLOAD] Removed peers: {[peer.id() for peer in peers_removed]}")
+        else:
+          print("[PEER DOWNLOAD] No peers connected")
+      
+      # Update the peer list in the downloader
       self.shard_downloader.set_peers(next_peers)
       
     # Re-setup coordinator if peers have changed

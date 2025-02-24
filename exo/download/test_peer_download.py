@@ -388,5 +388,98 @@ async def test_ensure_shard_fallback_when_peer_download_fails(mock_get_repo, moc
         assert called_engine == "test-engine"
 
 
+@pytest.mark.asyncio
+async def test_peer_downloader_detailed_logging(capsys):
+    """Test that the peer downloader logs with [PEER DOWNLOAD] tag"""
+    fallback = MockFallbackDownloader()
+    downloader = PeerShardDownloader(fallback)
+    
+    # Create mock peers with different model availability
+    peer1 = MockPeerHandle("peer1", has_model=False)
+    peer2 = MockPeerHandle("peer2", has_model=True, is_complete=True)
+    
+    # Set all peers
+    downloader.set_peers([peer1, peer2])
+    downloader.set_coordinator_id("coordinator-node")
+    
+    # Find peer with model
+    best_peer = await downloader.find_peer_with_model("test-model-repo")
+    
+    # Capture the output and verify the log messages contain [PEER DOWNLOAD]
+    captured = capsys.readouterr()
+    assert "[PEER DOWNLOAD]" in captured.out
+    assert "Searching for peer with model" in captured.out
+    assert "Found peer" in captured.out
+
+@pytest.mark.asyncio
+async def test_coordinator_based_download_decision():
+    """Test that the download path depends on coordinator status"""
+    fallback = MockFallbackDownloader()
+    downloader = PeerShardDownloader(fallback)
+    
+    # Create mock shard and peer
+    shard = Shard("test-model", 0, 1, 2)
+    peer = MockPeerHandle("peer1", has_model=True, is_complete=True)
+    
+    with patch('exo.download.peer_download.get_repo', return_value="test-repo/model"):
+        with patch('exo.download.peer_download.aios.path.exists', return_value=False):
+            with patch('exo.download.peer_download.ensure_downloads_dir', new_callable=AsyncMock) as mock_ensure_dir:
+                mock_ensure_dir.return_value = Path("/mock/downloads")
+                
+                # Case 1: I am not the coordinator and there are peers
+                downloader.set_peers([peer])
+                downloader.set_coordinator_id("coordinator-node")
+                
+                # Mock the find_peer_with_model method
+                downloader.find_peer_with_model = AsyncMock(return_value=None)
+                
+                # Should try to find peer first
+                await downloader.ensure_shard(shard, "test-engine")
+                downloader.find_peer_with_model.assert_called_once()
+                
+                # Case 2: I am the coordinator
+                downloader.find_peer_with_model.reset_mock()
+                downloader.set_coordinator_id(peer.id())
+                
+                # Should download directly without trying to find peer
+                await downloader.ensure_shard(shard, "test-engine")
+                downloader.find_peer_with_model.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_download_performance_metrics(capsys):
+    """Test that the download methods report performance metrics"""
+    fallback = MockFallbackDownloader()
+    downloader = PeerShardDownloader(fallback)
+    
+    # Create a mock peer with a file
+    mock_file = {"path": "model.safetensors", "size": 1024 * 1024}  # 1MB file
+    peer = MockPeerHandle("peer1", has_model=True, is_complete=True, files=[mock_file])
+    
+    # Set up the aiofiles.open mock
+    mock_file_handle = AsyncMock()
+    mock_file_handle.__aenter__.return_value.write = AsyncMock(return_value=1024 * 1024)
+    
+    with patch('aiofiles.open', return_value=mock_file_handle):
+        with patch('exo.download.peer_download.aios.rename', new_callable=AsyncMock) as mock_rename:
+            with patch('exo.download.peer_download.aios.makedirs', new_callable=AsyncMock):
+                with patch('exo.download.peer_download.aios.path.exists', return_value=False):
+                    # Download the file
+                    progress_callback = MagicMock()
+                    result = await downloader.download_file_from_peer(
+                        peer,
+                        "test-repo",
+                        "main",
+                        "model.safetensors",
+                        Path("/mock/downloads/test-repo"),
+                        progress_callback
+                    )
+                    
+                    # Check that performance metrics were logged
+                    captured = capsys.readouterr()
+                    assert "[PEER DOWNLOAD]" in captured.out
+                    assert "Successfully downloaded" in captured.out
+                    assert "MB/s" in captured.out  # Speed metrics
+                    assert "s (" in captured.out  # Time metrics with seconds
+
 if __name__ == "__main__":
     pytest.main(["-xvs", "test_peer_download.py"])

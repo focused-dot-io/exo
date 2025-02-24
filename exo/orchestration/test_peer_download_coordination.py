@@ -84,7 +84,7 @@ class MockPartitioningStrategy(PartitioningStrategy):
 
 
 @pytest.mark.asyncio
-async def test_node_setup_peer_download_coordinator():
+async def test_node_setup_peer_download_coordinator(capsys):
     """Test that a node properly sets up a peer download coordinator"""
     
     # Create a mock peer downloader
@@ -129,10 +129,15 @@ async def test_node_setup_peer_download_coordinator():
     # The coordinator should be the node with the lowest ID
     expected_coordinator = min([node.id, peer1.id(), peer2.id()])
     assert peer_downloader._coordinator_id == expected_coordinator
+    
+    # Check for [PEER DOWNLOAD] logs
+    captured = capsys.readouterr()
+    assert "[PEER DOWNLOAD]" in captured.out
+    assert "Setting up peer download coordination" in captured.out
 
 
 @pytest.mark.asyncio
-async def test_node_updates_peer_downloader_on_peer_changes():
+async def test_node_updates_peer_downloader_on_peer_changes(capsys):
     """Test that the peer downloader is updated when peers change"""
     
     # Create a mock peer downloader
@@ -151,8 +156,10 @@ async def test_node_updates_peer_downloader_on_peer_changes():
         partitioning_strategy=MockPartitioningStrategy()
     )
     
-    # Start the node
-    await node.start()
+    # Mock collect_topology to avoid None.nodes issue
+    with patch.object(Node, 'collect_topology', return_value=None):
+        # Start the node
+        await node.start()
     
     # Verify no peers in the downloader
     assert len(peer_downloader.peers) == 0
@@ -163,25 +170,38 @@ async def test_node_updates_peer_downloader_on_peer_changes():
     discovery.peers = [peer1, peer2]
     
     # Update peers
-    await node.update_peers()
+    with patch.object(Node, 'collect_topology', return_value=None):
+        await node.update_peers()
     
     # Verify peers were added to the downloader
     assert len(peer_downloader.peers) == 2
+    
+    # Check for [PEER DOWNLOAD] logs about peer updates
+    captured = capsys.readouterr()
+    assert "[PEER DOWNLOAD]" in captured.out
+    assert "Peer list updated" in captured.out
+    assert "New peers" in captured.out
     
     # Now remove a peer
     discovery.peers = [peer1]
     
     # Update peers again
-    await node.update_peers()
+    with patch.object(Node, 'collect_topology', return_value=None):
+        await node.update_peers()
     
     # Verify peer was removed from the downloader
     assert len(peer_downloader.peers) == 1
     assert peer_downloader.peers[0].id() == "peer1"
+    
+    # Check for [PEER DOWNLOAD] logs about peer removal
+    captured = capsys.readouterr()
+    assert "[PEER DOWNLOAD]" in captured.out
+    assert "Removed peers" in captured.out
 
 
 @pytest.mark.asyncio
 @patch('exo.download.peer_download.get_repo')
-async def test_inference_engine_uses_peer_downloader(mock_get_repo):
+async def test_inference_engine_uses_peer_downloader(mock_get_repo, capsys):
     """Test that the inference engine uses the peer downloader to get shards"""
     
     mock_get_repo.return_value = "test-repo/model"
@@ -224,6 +244,10 @@ async def test_inference_engine_uses_peer_downloader(mock_get_repo):
     # Create a test shard
     shard = Shard("test-model", 0, 1, 2)
     
+    # Mock the find_peer_with_model method for testing coordinator behavior
+    find_peer_mock = AsyncMock(return_value=peer)
+    peer_downloader.find_peer_with_model = find_peer_mock
+    
     # Mock the download_model_from_peer method to avoid actual downloading
     peer_downloader.download_model_from_peer = AsyncMock(return_value=Path("/mock/downloads/test-repo--model"))
     
@@ -239,10 +263,28 @@ async def test_inference_engine_uses_peer_downloader(mock_get_repo):
             ensure_shard_spy.assert_called_once()
             ensure_shard_spy.assert_called_with(shard, "MockInferenceEngine")
             
-            # If the node ID is not the coordinator, it should try to find a peer with the model
-            if node.id != peer_downloader._coordinator_id:
-                # Check if peer.has_model was called
-                assert len(peer.has_model_calls) > 0
+            # Verify find_peer_with_model was called (since we're not the coordinator)
+            find_peer_mock.assert_called_once()
+            
+            # Verify logs have [PEER DOWNLOAD] tag
+            captured = capsys.readouterr()
+            assert "[PEER DOWNLOAD]" in captured.out
+
+@pytest.mark.asyncio
+async def test_coordinator_waiting_behavior():
+    """Test the wait behavior added for non-coordinator nodes"""
+    # We'll test the actual sleep call directly
+    with patch('asyncio.sleep', new_callable=AsyncMock) as sleep_mock:
+        # Set up test conditions: node is not coordinator and has peers
+        is_coordinator = False
+        has_peers = True
+        
+        # Call the sleep method directly - passing the patch correctly
+        from exo.orchestration.node import Node
+        await Node._coordinator_wait_if_needed(is_coordinator, has_peers, sleep_mock)
+        
+        # Verify sleep was called (waiting for coordinator)
+        sleep_mock.assert_called_once()
 
 
 if __name__ == "__main__":

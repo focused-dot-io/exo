@@ -184,9 +184,18 @@ class GRPCServer(node_service_pb2_grpc.NodeServiceServicer):
               else:
                 available_files.append(os.path.join(rel_root, file))
                 
-        # Consider the model complete if it has files
-        # A more sophisticated approach would check for specific model files
-        is_complete = len(available_files) > 0
+        # Check for specific config files to determine if model is complete
+        required_files = ["config.json", "tokenizer.json", "tokenizer_config.json"]
+        has_required_files = any(file in available_files for file in required_files)
+        
+        # Consider the model complete if it has required config files and at least one weight file
+        is_complete = has_required_files and any(
+            file.endswith(".safetensors") or 
+            file.endswith(".bin") or
+            file.endswith(".pt") or
+            file.endswith(".gguf")
+            for file in available_files
+        )
       
       return node_service_pb2.HasModelResponse(
         has_model=has_model,

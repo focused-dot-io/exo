@@ -117,6 +117,38 @@ class PeerShardDownloader(ShardDownloader):
         best_peer = None
         most_complete = False
         
+        # First check specifically for the coordinator
+        coordinator_peer = None
+        if self._coordinator_id:
+            for peer in self.peers:
+                if peer.id() == self._coordinator_id:
+                    coordinator_peer = peer
+                    break
+        
+        # If coordinator is found, prioritize checking it first
+        if coordinator_peer:
+            try:
+                if await coordinator_peer.is_connected():
+                    print(f"[PEER DOWNLOAD] Checking coordinator: {coordinator_peer.id()}")
+                    has_model_response = await coordinator_peer.has_model(repo_id, revision)
+                    if has_model_response.has_model:
+                        if has_model_response.is_complete:
+                            print(f"[PEER DOWNLOAD] Coordinator {coordinator_peer.id()} has complete model {repo_id}")
+                            return coordinator_peer
+                        else:
+                            print(f"[PEER DOWNLOAD] Coordinator {coordinator_peer.id()} has partial model {repo_id}")
+                            best_peer = coordinator_peer
+                            most_complete = False
+                    else:
+                        print(f"[PEER DOWNLOAD] Coordinator {coordinator_peer.id()} does not have model {repo_id}")
+                else:
+                    print(f"[PEER DOWNLOAD] Coordinator {coordinator_peer.id()} is not connected")
+            except Exception as e:
+                print(f"[PEER DOWNLOAD] Error checking if coordinator {coordinator_peer.id()} has model {repo_id}: {e}")
+                if DEBUG >= 2:
+                    traceback.print_exc()
+        
+        # If coordinator doesn't have it or there is no coordinator, check other peers
         if not self.peers:
             print(f"[PEER DOWNLOAD] No peers available to search for model {repo_id}")
             return None
@@ -124,6 +156,10 @@ class PeerShardDownloader(ShardDownloader):
         print(f"[PEER DOWNLOAD] Checking {len(self.peers)} peers for model {repo_id}")
         
         for i, peer in enumerate(self.peers):
+            # Skip the coordinator if we already checked it
+            if coordinator_peer and peer.id() == coordinator_peer.id():
+                continue
+                
             try:
                 if await peer.is_connected():
                     print(f"[PEER DOWNLOAD] Checking peer {i+1}/{len(self.peers)}: {peer.id()}")
@@ -225,7 +261,10 @@ class PeerShardDownloader(ShardDownloader):
         await aios.makedirs(target_dir, exist_ok=True)
         
         # Get list of files from peer
-        allow_patterns = await resolve_allow_patterns(shard, inference_engine_name)
+        # Use '*' to ensure we get ALL files, not just tensors
+        allow_patterns = ["*"]  # This will override the specific patterns and get everything
+        
+        print(f"[PEER DOWNLOAD] Getting complete file list for {repo_id} from peer {peer.id()}")
         file_list_response = await peer.get_model_file_list(repo_id, revision, allow_patterns)
         
         if not file_list_response.files:
@@ -233,6 +272,14 @@ class PeerShardDownloader(ShardDownloader):
             
         # Convert the file list to the format our progress tracking expects
         file_list = [{"path": f.path, "size": f.size} for f in file_list_response.files]
+        
+        # Debug log to show what files we're going to download
+        if DEBUG >= 2:
+            print(f"[PEER DOWNLOAD] Found {len(file_list)} files to download:")
+            for file in file_list:
+                print(f"[PEER DOWNLOAD]   - {file['path']} ({file['size']/1024/1024:.2f} MB)")
+        else:
+            print(f"[PEER DOWNLOAD] Found {len(file_list)} files to download (total size: {sum(f['size'] for f in file_list)/1024/1024:.2f} MB)")
         
         # Setup progress tracking (similar to download_shard in new_shard_download.py)
         all_start_time = time.time()

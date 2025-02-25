@@ -511,32 +511,75 @@ class PeerShardDownloader(ShardDownloader):
             print(f"[PEER DOWNLOAD] No peers have {repo_id} yet, but I am not the coordinator")
             print(f"[PEER DOWNLOAD] Will continue waiting for coordinator ({self._coordinator_id}) to download model")
             
-            # If we have a coordinator peer, wait for it
-            if coordinator_peer:
-                print(f"[PEER DOWNLOAD] Waiting up to 300 seconds for coordinator to download model...")
-                wait_success = await self._wait_for_model_on_coordinator(
-                    coordinator_peer, repo_id, max_wait_seconds=300, poll_interval_seconds=5.0
-                )
-                
-                if wait_success:
-                    print(f"[PEER DOWNLOAD] Coordinator now has model {repo_id}, downloading from coordinator")
-                    return await self.download_model_from_peer(
-                        coordinator_peer, shard, inference_engine_name, self.on_progress
+            # Keep waiting for the coordinator, with retries if needed
+            max_retries = 5
+            for retry in range(max_retries):
+                # First find the coordinator peer (it might have reconnected)
+                coordinator_peer = None
+                for peer in self.peers:
+                    if peer.id() == self._coordinator_id:
+                        coordinator_peer = peer
+                        break
+                        
+                if coordinator_peer:
+                    print(f"[PEER DOWNLOAD] Waiting up to 300 seconds for coordinator to download model (attempt {retry+1}/{max_retries})...")
+                    wait_success = await self._wait_for_model_on_coordinator(
+                        coordinator_peer, repo_id, max_wait_seconds=300, poll_interval_seconds=5.0
                     )
+                    
+                    if wait_success:
+                        print(f"[PEER DOWNLOAD] Coordinator now has model {repo_id}, downloading from coordinator")
+                        try:
+                            result = await self.download_model_from_peer(
+                                coordinator_peer, shard, inference_engine_name, self.on_progress
+                            )
+                            print(f"[PEER DOWNLOAD] Successfully downloaded model from coordinator")
+                            return result
+                        except Exception as e:
+                            print(f"[PEER DOWNLOAD] Error downloading from coordinator: {e}")
+                            print(f"[PEER DOWNLOAD] Will retry waiting for complete model")
+                            # Continue to next retry
                 else:
-                    print(f"[PEER DOWNLOAD] ERROR: Could not download {repo_id} - coordinator did not download it")
-                    # Return a valid path to the download directory, creating it if needed
-                    await aios.makedirs(target_dir, exist_ok=True)
-                    print(f"[PEER DOWNLOAD] CRITICAL FAILURE: Using empty model directory {target_dir}")
-                    print(f"[PEER DOWNLOAD] Inference will likely fail - please restart and try again")
-                    return target_dir
-            else:
-                print(f"[PEER DOWNLOAD] ERROR: Could not find coordinator peer {self._coordinator_id}")
-                # Return a valid path to the download directory, creating it if needed
-                await aios.makedirs(target_dir, exist_ok=True)
-                print(f"[PEER DOWNLOAD] CRITICAL FAILURE: Using empty model directory {target_dir}")
-                print(f"[PEER DOWNLOAD] Inference will likely fail - please restart and try again")
-                return target_dir
+                    print(f"[PEER DOWNLOAD] Coordinator peer {self._coordinator_id} not found (attempt {retry+1}/{max_retries})")
+                    print(f"[PEER DOWNLOAD] Waiting 30 seconds for peers to reconnect...")
+                    await asyncio.sleep(30)  # Wait for peers to potentially reconnect
+                    
+                    # Update peers list
+                    if hasattr(self.node, 'update_peers'):
+                        try:
+                            await self.node.update_peers()
+                        except:
+                            # If we can't update peers, just continue
+                            pass
+                            
+            # If we get here, we've tried multiple times and still can't download the model
+            print(f"[PEER DOWNLOAD] ERROR: Could not download model after {max_retries} attempts")
+            print(f"[PEER DOWNLOAD] Please check that the coordinator is running and downloading the model")
+            print(f"[PEER DOWNLOAD] Suspending inference until model is available - will not use empty directory")
+            
+            # Keep retrying forever at this point, but with longer intervals
+            print(f"[PEER DOWNLOAD] Entering continuous wait mode - will check every 60 seconds")
+            while True:
+                await asyncio.sleep(60)
+                print(f"[PEER DOWNLOAD] Still waiting for coordinator to download model...")
+                
+                # Find the coordinator peer again
+                coordinator_peer = None
+                for peer in self.peers:
+                    if peer.id() == self._coordinator_id:
+                        coordinator_peer = peer
+                        break
+                        
+                if coordinator_peer:
+                    wait_success = await self._wait_for_model_on_coordinator(
+                        coordinator_peer, repo_id, max_wait_seconds=10, poll_interval_seconds=2.0
+                    )
+                    
+                    if wait_success:
+                        print(f"[PEER DOWNLOAD] Finally found model on coordinator, downloading now")
+                        return await self.download_model_from_peer(
+                            coordinator_peer, shard, inference_engine_name, self.on_progress
+                        )
     
     async def get_shard_download_status(self, inference_engine_name: str) -> AsyncIterator[tuple[Path, RepoProgressEvent]]:
         """Get the download status of all shards"""

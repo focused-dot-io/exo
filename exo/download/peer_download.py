@@ -525,11 +525,18 @@ class PeerShardDownloader(ShardDownloader):
                     )
                 else:
                     print(f"[PEER DOWNLOAD] ERROR: Could not download {repo_id} - coordinator did not download it")
-                    # Return empty path to indicate failure
-                    return None
+                    # Return a valid path to the download directory, creating it if needed
+                    await aios.makedirs(target_dir, exist_ok=True)
+                    print(f"[PEER DOWNLOAD] CRITICAL FAILURE: Using empty model directory {target_dir}")
+                    print(f"[PEER DOWNLOAD] Inference will likely fail - please restart and try again")
+                    return target_dir
             else:
                 print(f"[PEER DOWNLOAD] ERROR: Could not find coordinator peer {self._coordinator_id}")
-                return None
+                # Return a valid path to the download directory, creating it if needed
+                await aios.makedirs(target_dir, exist_ok=True)
+                print(f"[PEER DOWNLOAD] CRITICAL FAILURE: Using empty model directory {target_dir}")
+                print(f"[PEER DOWNLOAD] Inference will likely fail - please restart and try again")
+                return target_dir
     
     async def get_shard_download_status(self, inference_engine_name: str) -> AsyncIterator[tuple[Path, RepoProgressEvent]]:
         """Get the download status of all shards"""

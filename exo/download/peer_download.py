@@ -339,7 +339,29 @@ class PeerShardDownloader(ShardDownloader):
         file_list_response = await peer.get_model_file_list(repo_id, revision, allow_patterns)
         
         if not file_list_response.files:
-            raise Exception(f"Peer {peer.id()} returned empty file list for {repo_id}")
+            # If this is the coordinator, continue waiting instead of raising error
+            if peer.id() == self._coordinator_id:
+                print(f"[PEER DOWNLOAD] Coordinator {peer.id()} does not have model files yet for {repo_id}")
+                print(f"[PEER DOWNLOAD] Coordinator is likely still starting the download")
+                print(f"[PEER DOWNLOAD] Will wait for coordinator to download model...")
+                
+                # Wait for coordinator to download model
+                wait_success = await self._wait_for_model_on_coordinator(
+                    peer, repo_id, max_wait_seconds=300, poll_interval_seconds=5.0
+                )
+                
+                if wait_success:
+                    print(f"[PEER DOWNLOAD] Coordinator now has model, trying to get file list again")
+                    # Try again after waiting
+                    file_list_response = await peer.get_model_file_list(repo_id, revision, allow_patterns)
+                    
+                    if not file_list_response.files:
+                        raise Exception(f"Coordinator {peer.id()} returned empty file list for {repo_id} even after waiting")
+                else:
+                    raise Exception(f"Timed out waiting for coordinator to download {repo_id}")
+            else:
+                # For non-coordinator peers, just raise the error
+                raise Exception(f"Peer {peer.id()} returned empty file list for {repo_id}")
             
         # Convert the file list to the format our progress tracking expects
         file_list = [{"path": f.path, "size": f.size} for f in file_list_response.files]
@@ -579,6 +601,21 @@ class PeerShardDownloader(ShardDownloader):
                 
                 # Download from peer
                 download_start = time.time()
+                
+                # Special case for coordinator - if coordinator is still in early stages of downloading,
+                # we might get a "has_model=True" but empty file list. Handle this specially.
+                if peer.id() == self._coordinator_id:
+                    print(f"[PEER DOWNLOAD] Downloading from coordinator {peer.id()}")
+                    
+                    # First check if this is just the start of the download
+                    file_list_response = await peer.get_model_file_list(repo_id, revision, ["*"])
+                    if not file_list_response.files:
+                        print(f"[PEER DOWNLOAD] Coordinator {peer.id()} has model but no files yet - waiting for download to progress")
+                        # Wait for coordinator to make progress
+                        wait_success = await self._wait_for_model_on_coordinator(
+                            peer, repo_id, max_wait_seconds=300, poll_interval_seconds=5.0
+                        )
+                
                 target_dir = await self.download_model_from_peer(
                     peer, 
                     shard, 
@@ -588,16 +625,29 @@ class PeerShardDownloader(ShardDownloader):
                 download_time = time.time() - download_start
                 
                 # No longer downloading this model
-                self.downloading_models.remove(repo_id)
+                if repo_id in self.downloading_models:
+                    self.downloading_models.remove(repo_id)
                 
                 print(f"[PEER DOWNLOAD] Successfully downloaded {repo_id} from peer {peer.id()} in {download_time:.2f} seconds")
                 return target_dir
                 
             except Exception as e:
-                print(f"[PEER DOWNLOAD] Failed to download {repo_id} from peer {peer.id()}, falling back to direct download")
+                print(f"[PEER DOWNLOAD] Failed to download {repo_id} from peer {peer.id()}")
                 print(f"[PEER DOWNLOAD] Error: {e}")
                 if DEBUG >= 2:
                     traceback.print_exc()
+                
+                # If this was the coordinator and we failed, we should wait and retry
+                # instead of falling back to direct download (for non-coordinator nodes)
+                if peer.id() == self._coordinator_id and self._coordinator_id != self.peers[0].id():
+                    am_i_coordinator = False
+                    if self._coordinator_id:
+                        my_id = self.peers[0].id() if self.peers else "unknown"
+                        am_i_coordinator = (self._coordinator_id == my_id)
+                    
+                    if not am_i_coordinator:
+                        print(f"[PEER DOWNLOAD] Will wait and retry downloading from coordinator")
+                        # Continue to wait-and-retry logic below instead of falling back
                     
                 # No longer downloading this model
                 if repo_id in self.downloading_models:

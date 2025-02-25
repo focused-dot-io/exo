@@ -710,13 +710,10 @@ class PeerShardDownloader(ShardDownloader):
                     print(f"[PEER DOWNLOAD] Waiting 30 seconds for peers to reconnect...")
                     await asyncio.sleep(30)  # Wait for peers to potentially reconnect
                     
-                    # Update peers list
-                    if hasattr(self.node, 'update_peers'):
-                        try:
-                            await self.node.update_peers()
-                        except:
-                            # If we can't update peers, just continue
-                            pass
+                    # The PeerShardDownloader can't update its own peers list here
+                    # This is a limitation - it depends on someone else setting its peers through set_peers()
+                    # This update would need to be handled at the Node level, which calls set_peers() periodically
+                    print(f"[PEER DOWNLOAD] Cannot automatically update peer list - waiting for external peer updates")
                             
             # If we get here, we've tried multiple times and still can't download the model
             print(f"[PEER DOWNLOAD] ERROR: Could not download model after {max_retries} attempts")

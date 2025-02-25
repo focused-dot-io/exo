@@ -239,6 +239,15 @@ class PeerShardDownloader(ShardDownloader):
     ) -> Path:
         """Download a single file from a peer"""
         print(f"[PEER DOWNLOAD] Downloading file {file_path} from peer {peer.id()}")
+        
+        # Log on the sending side too (if we're the coordinator)
+        try:
+            if hasattr(peer, 'remote_id'):
+                receiving_node_id = getattr(peer, 'remote_id', "unknown")
+                print(f"[PEER DOWNLOAD] SENDING file {file_path} to node {receiving_node_id}")
+        except:
+            # If we can't get the remote ID, that's fine
+            pass
             
         try:
             # Create directory structure
@@ -279,6 +288,15 @@ class PeerShardDownloader(ShardDownloader):
             await aios.rename(partial_path, target_dir/file_path)
             
             print(f"[PEER DOWNLOAD] Successfully downloaded {file_path} ({downloaded/1024/1024:.2f} MB) in {file_download_time:.2f}s ({download_speed_mbps:.2f} MB/s)")
+            
+            # Log for coordinator side
+            try:
+                if hasattr(peer, 'remote_id'):
+                    receiving_node_id = getattr(peer, 'remote_id', "unknown")
+                    print(f"[PEER DOWNLOAD] SENT file {file_path} ({downloaded/1024/1024:.2f} MB) to node {receiving_node_id}")
+            except:
+                pass
+                
             return target_dir/file_path
             
         except Exception as e:
@@ -294,7 +312,11 @@ class PeerShardDownloader(ShardDownloader):
         inference_engine_name: str, 
         on_progress: AsyncCallbackSystem[str, Tuple[Shard, RepoProgressEvent]]
     ) -> Path:
-        """Download a full model from a peer"""
+        """Download a full model from a peer
+        
+        This method is called by the non-coordinator nodes to download from the coordinator,
+        or by any node to download from a peer that has the model.
+        """
         repo_id = get_repo(shard.model_id, inference_engine_name)
         revision = "main"
         target_dir = await ensure_downloads_dir()/repo_id.replace("/", "--")
@@ -305,6 +327,15 @@ class PeerShardDownloader(ShardDownloader):
         allow_patterns = ["*"]  # This will override the specific patterns and get everything
         
         print(f"[PEER DOWNLOAD] Getting complete file list for {repo_id} from peer {peer.id()}")
+        
+        # Log on the sending side too (if we're sending model to another node)
+        try:
+            if hasattr(peer, 'remote_id'):
+                print(f"[PEER DOWNLOAD] Preparing to SEND model {repo_id} to node {peer.remote_id}")
+        except:
+            # If we can't get the remote ID, that's fine
+            pass
+            
         file_list_response = await peer.get_model_file_list(repo_id, revision, allow_patterns)
         
         if not file_list_response.files:
@@ -319,7 +350,22 @@ class PeerShardDownloader(ShardDownloader):
             for file in file_list:
                 print(f"[PEER DOWNLOAD]   - {file['path']} ({file['size']/1024/1024:.2f} MB)")
         else:
-            print(f"[PEER DOWNLOAD] Found {len(file_list)} files to download (total size: {sum(f['size'] for f in file_list)/1024/1024:.2f} MB)")
+            total_size_mb = sum(f['size'] for f in file_list)/1024/1024
+            print(f"[PEER DOWNLOAD] Found {len(file_list)} files to download (total size: {total_size_mb:.2f} MB)")
+            
+            # Create a status event to show in the UI
+            from exo.download.download_progress import RepoProgressEvent
+            download_start_event = RepoProgressEvent(
+                repo_id=repo_id,
+                revision=revision,
+                file_progress={},
+                status=f"Peer download starting: {len(file_list)} files, {total_size_mb:.2f} MB",
+                progress=0.0,
+                eta=timedelta(seconds=0),
+                speed=0,
+                start_time=time.time()
+            )
+            on_progress.trigger_all(shard, download_start_event)
         
         # Setup progress tracking (similar to download_shard in new_shard_download.py)
         all_start_time = time.time()
@@ -470,9 +516,49 @@ class PeerShardDownloader(ShardDownloader):
                 
                 if wait_success:
                     print(f"[PEER DOWNLOAD] Coordinator now has model {repo_id}, will download from coordinator")
+                    
+                    # Create a status event to update the UI that we're waiting
+                    try:
+                        from exo.download.download_progress import RepoProgressEvent
+                        status_event = RepoProgressEvent(
+                            repo_id=repo_id,
+                            revision="main",
+                            file_progress={},
+                            status=f"Preparing to download {repo_id} from coordinator",
+                            progress=0.0,
+                            eta=timedelta(seconds=0),
+                            speed=0,
+                            start_time=time.time()
+                        )
+                        # Try to trigger the event if we have an on_progress callback
+                        if hasattr(self, 'on_progress'):
+                            self.on_progress.trigger_all(shard, status_event)
+                    except Exception:
+                        # Don't fail if there's an error updating status
+                        pass
             elif not coordinator_has_complete_model:
                 # Coordinator has model but it's incomplete - wait for it to complete
                 print(f"[PEER DOWNLOAD] Coordinator has incomplete model {repo_id}, waiting for it to finish downloading...")
+                
+                # Create a status event to update the UI that we're waiting for coordinator
+                try:
+                    from exo.download.download_progress import RepoProgressEvent
+                    waiting_event = RepoProgressEvent(
+                        repo_id=repo_id,
+                        revision="main",
+                        file_progress={},
+                        status=f"Waiting for coordinator to complete downloading {repo_id}",
+                        progress=0.0,
+                        eta=timedelta(seconds=0),
+                        speed=0,
+                        start_time=time.time()
+                    )
+                    # Try to trigger the event if we have an on_progress callback
+                    if hasattr(self, 'on_progress'):
+                        self.on_progress.trigger_all(shard, waiting_event)
+                except Exception:
+                    # Don't fail if there's an error updating status
+                    pass
                 
                 # Use our wait method to poll for coordinator to complete download
                 wait_success = await self._wait_for_model_on_coordinator(coordinator_peer, repo_id)
@@ -552,6 +638,26 @@ class PeerShardDownloader(ShardDownloader):
             print(f"[PEER DOWNLOAD] No peers have {repo_id} yet, but I am not the coordinator")
             print(f"[PEER DOWNLOAD] Will continue waiting for coordinator ({self._coordinator_id}) to download model")
             
+            # Create a status event to update the UI that we're waiting for the coordinator
+            try:
+                from exo.download.download_progress import RepoProgressEvent
+                waiting_event = RepoProgressEvent(
+                    repo_id=repo_id,
+                    revision="main",
+                    file_progress={},
+                    status=f"Waiting for coordinator to download model {repo_id}...",
+                    progress=0.0,
+                    eta=timedelta(seconds=0),
+                    speed=0,
+                    start_time=time.time()
+                )
+                # Try to trigger the event if we have an on_progress callback
+                if hasattr(self, 'on_progress'):
+                    self.on_progress.trigger_all(shard, waiting_event)
+            except Exception:
+                # Don't fail if there's an error updating status
+                pass
+            
             # Keep waiting for the coordinator, with retries if needed
             max_retries = 5
             for retry in range(max_retries):
@@ -564,6 +670,25 @@ class PeerShardDownloader(ShardDownloader):
                         
                 if coordinator_peer:
                     print(f"[PEER DOWNLOAD] Waiting up to 300 seconds for coordinator to download model (attempt {retry+1}/{max_retries})...")
+                    
+                    # Update the UI with the retry attempt
+                    try:
+                        from exo.download.download_progress import RepoProgressEvent
+                        retry_event = RepoProgressEvent(
+                            repo_id=repo_id,
+                            revision="main",
+                            file_progress={},
+                            status=f"Waiting for coordinator (attempt {retry+1}/{max_retries})...",
+                            progress=float(retry) / max_retries,  # Show some progress in the UI
+                            eta=timedelta(seconds=300),
+                            speed=0,
+                            start_time=time.time()
+                        )
+                        if hasattr(self, 'on_progress'):
+                            self.on_progress.trigger_all(shard, retry_event)
+                    except Exception:
+                        pass
+                        
                     wait_success = await self._wait_for_model_on_coordinator(
                         coordinator_peer, repo_id, max_wait_seconds=300, poll_interval_seconds=5.0
                     )
@@ -598,11 +723,52 @@ class PeerShardDownloader(ShardDownloader):
             print(f"[PEER DOWNLOAD] Please check that the coordinator is running and downloading the model")
             print(f"[PEER DOWNLOAD] Suspending inference until model is available - will not use empty directory")
             
+            # Update UI to show we're in continuous wait mode
+            try:
+                from exo.download.download_progress import RepoProgressEvent
+                continuous_wait_event = RepoProgressEvent(
+                    repo_id=repo_id,
+                    revision="main",
+                    file_progress={},
+                    status=f"Entering continuous wait mode for model {repo_id}...",
+                    progress=0.1,  # Show a small amount of progress
+                    eta=timedelta(seconds=0),  # Unknown ETA
+                    speed=0,
+                    start_time=time.time()
+                )
+                if hasattr(self, 'on_progress'):
+                    self.on_progress.trigger_all(shard, continuous_wait_event)
+            except Exception:
+                pass
+            
             # Keep retrying forever at this point, but with longer intervals
             print(f"[PEER DOWNLOAD] Entering continuous wait mode - will check every 60 seconds")
+            check_count = 0
             while True:
+                check_count += 1
                 await asyncio.sleep(60)
-                print(f"[PEER DOWNLOAD] Still waiting for coordinator to download model...")
+                
+                # Update status every 5 minutes in the UI
+                if check_count % 5 == 0:
+                    try:
+                        wait_time_mins = check_count
+                        from exo.download.download_progress import RepoProgressEvent
+                        long_wait_event = RepoProgressEvent(
+                            repo_id=repo_id,
+                            revision="main",
+                            file_progress={},
+                            status=f"Still waiting for coordinator ({wait_time_mins} minutes)...",
+                            progress=min(0.2 + (check_count / 100.0), 0.9),  # Slowly increase progress but never complete
+                            eta=timedelta(seconds=0),
+                            speed=0,
+                            start_time=time.time()
+                        )
+                        if hasattr(self, 'on_progress'):
+                            self.on_progress.trigger_all(shard, long_wait_event)
+                    except Exception:
+                        pass
+                        
+                print(f"[PEER DOWNLOAD] Still waiting for coordinator to download model... (check {check_count})")
                 
                 # Find the coordinator peer again
                 coordinator_peer = None

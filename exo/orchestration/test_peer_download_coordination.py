@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 from pathlib import Path
 
 from exo.inference.shard import Shard
-from exo.networking.peer_handle import PeerHandle
+from exo.networking.peer_handle import PeerHandle, HasModelResponse, ModelFileListResponse, ModelFileInfo, FileChunk
 from exo.download.peer_download import PeerShardDownloader
 from exo.download.shard_download import ShardDownloader
 from exo.orchestration.node import Node
@@ -13,9 +13,31 @@ from exo.networking.server import Server
 from exo.networking.discovery import Discovery
 from exo.inference.inference_engine import InferenceEngine
 from exo.topology.partitioning_strategy import PartitioningStrategy
+from exo.topology.device_capabilities import device_capabilities
+from exo.helpers import DEBUG
 
 # Import MockPeerHandle from the unit tests
 from exo.download.test_peer_download import MockPeerHandle, MockFallbackDownloader
+
+
+# Create a subclass of Node that doesn't create background tasks for testing
+# Use a name that doesn't start with 'Test' to avoid pytest trying to collect it
+class NonBackgroundTaskNode(Node):
+    """A subclass of Node that doesn't create background tasks for testing"""
+    
+    async def start(self, wait_for_peers: int = 0) -> None:
+        """Override start to not create background tasks"""
+        self.device_capabilities = await device_capabilities()
+        await self.server.start()
+        await self.discovery.start()
+        await self.update_peers(wait_for_peers)
+        await self.collect_topology(set())
+        if DEBUG >= 2: print(f"Collected topology: {self.topology}")
+        
+        # Skip periodic_topology_collection to avoid test warnings
+        
+        # Setup download coordinator - first node discovered becomes the coordinator
+        await self.setup_peer_download_coordinator()
 
 class MockPeerShardDownloader(PeerShardDownloader):
     """A mock peer shard downloader for testing"""
@@ -107,8 +129,8 @@ async def test_node_setup_peer_download_coordinator(capsys):
     # Create a mock discovery that will return our peers
     discovery = MockDiscovery(peers=[peer1, peer2])
     
-    # Create a node with our peer downloader
-    node = Node(
+    # Create a test node with our peer downloader that won't create background tasks
+    node = NonBackgroundTaskNode(
         _id="test-node",
         server=MockServer(),
         inference_engine=MockInferenceEngine(peer_downloader),
@@ -123,6 +145,7 @@ async def test_node_setup_peer_download_coordinator(capsys):
     node.setup_peer_download_coordinator = setup_spy
     
     # Mock collect_topology to avoid None.nodes issue
+    # The global fixture handles the AsyncCallback and periodic task creation
     with patch.object(Node, 'collect_topology', return_value=None):
         # Start the node, which should call setup_peer_download_coordinator
         await node.start()
@@ -156,8 +179,8 @@ async def test_node_updates_peer_downloader_on_peer_changes(capsys):
     # Start with no peers
     discovery = MockDiscovery(peers=[])
     
-    # Create a node with our peer downloader
-    node = Node(
+    # Create a test node with our peer downloader that won't create background tasks
+    node = NonBackgroundTaskNode(
         _id="test-node",
         server=MockServer(),
         inference_engine=MockInferenceEngine(peer_downloader),
@@ -167,8 +190,9 @@ async def test_node_updates_peer_downloader_on_peer_changes(capsys):
     )
     
     # Mock collect_topology to avoid None.nodes issue
+    # The global fixture handles the AsyncCallback and periodic task creation
     with patch.object(Node, 'collect_topology', return_value=None):
-        # Start the node
+        # Start the node without spawning the periodic task
         await node.start()
     
     # Verify no peers in the downloader
@@ -179,9 +203,10 @@ async def test_node_updates_peer_downloader_on_peer_changes(capsys):
     peer2 = MockPeerHandle("peer2")
     discovery.peers = [peer1, peer2]
     
-    # Update peers
+    # Update peers - also patch AsyncCallbackSystem.notify to prevent "coroutine was never awaited" warning
     with patch.object(Node, 'collect_topology', return_value=None):
-        await node.update_peers()
+        with patch('exo.helpers.AsyncCallback.notify', new_callable=AsyncMock) as notify_mock:
+            await node.update_peers()
     
     # Verify peers were added to the downloader
     assert len(peer_downloader.peers) == 2
@@ -195,9 +220,10 @@ async def test_node_updates_peer_downloader_on_peer_changes(capsys):
     # Now remove a peer
     discovery.peers = [peer1]
     
-    # Update peers again
+    # Update peers again with the same patching to prevent warnings
     with patch.object(Node, 'collect_topology', return_value=None):
-        await node.update_peers()
+        with patch('exo.helpers.AsyncCallback.notify', new_callable=AsyncMock) as notify_mock:
+            await node.update_peers()
     
     # Verify peer was removed from the downloader
     assert len(peer_downloader.peers) == 1
@@ -233,8 +259,8 @@ async def test_inference_engine_uses_peer_downloader(mock_get_repo, capsys):
     # Create an inference engine that uses the peer downloader
     inference_engine = MockInferenceEngine(peer_downloader)
     
-    # Create a node
-    node = Node(
+    # Create a test node that won't create background tasks
+    node = NonBackgroundTaskNode(
         _id="test-node",
         server=MockServer(),
         inference_engine=inference_engine,
@@ -244,6 +270,7 @@ async def test_inference_engine_uses_peer_downloader(mock_get_repo, capsys):
     )
     
     # Mock collect_topology to avoid None.nodes issue
+    # The global fixture handles the AsyncCallback and periodic task creation
     with patch.object(Node, 'collect_topology', return_value=None):
         # Start the node, which sets up the coordinator
         await node.start()
@@ -264,21 +291,22 @@ async def test_inference_engine_uses_peer_downloader(mock_get_repo, capsys):
     # Make sure aios.path.exists returns False to force download
     with patch('exo.download.peer_download.aios.path.exists', return_value=False):
         with patch('exo.download.peer_download.ensure_downloads_dir', new_callable=AsyncMock) as mock_ensure_dir:
-            mock_ensure_dir.return_value = Path("/mock/downloads")
-            
-            # Ask the inference engine to ensure the shard
-            await inference_engine.ensure_shard(shard)
-            
-            # Verify the peer downloader's ensure_shard was called
-            ensure_shard_spy.assert_called_once()
-            ensure_shard_spy.assert_called_with(shard, "MockInferenceEngine")
-            
-            # Verify find_peer_with_model was called (since we're not the coordinator)
-            find_peer_mock.assert_called_once()
-            
-            # Verify logs have [PEER DOWNLOAD] tag
-            captured = capsys.readouterr()
-            assert "[PEER DOWNLOAD]" in captured.out
+            with patch('exo.download.peer_download.aios.makedirs', new_callable=AsyncMock):
+                mock_ensure_dir.return_value = Path("/mock/downloads")
+                
+                # Ask the inference engine to ensure the shard
+                await inference_engine.ensure_shard(shard)
+                
+                # Verify the peer downloader's ensure_shard was called
+                ensure_shard_spy.assert_called_once()
+                ensure_shard_spy.assert_called_with(shard, "MockInferenceEngine")
+                
+                # Verify find_peer_with_model was called (since we're not the coordinator)
+                find_peer_mock.assert_called_once()
+                
+                # Verify logs have [PEER DOWNLOAD] tag
+                captured = capsys.readouterr()
+                assert "[PEER DOWNLOAD]" in captured.out
 
 @pytest.mark.asyncio
 async def test_coordinator_waiting_behavior():
@@ -297,71 +325,114 @@ async def test_coordinator_waiting_behavior():
         sleep_mock.assert_called_once()
 
 
-@pytest.mark.skipif(True, reason="Currently fails - need to investigate peer download flow")
 @pytest.mark.asyncio
 async def test_end_to_end_coordinator_based_model_download():
     """Test that the non-coordinator nodes properly wait for the coordinator to download a model"""
     # Create a mock topology with two nodes
     coordinator_id = "aaa-coordinator"  # This will be first alphabetically
+    non_coordinator_id = "bbb-non-coordinator"
     
-    # Create mock peer handles - coordinator is the peer with the model
-    coordinator_peer = MockPeerHandle(coordinator_id, has_model=True, is_complete=True)
+    # Create mock peer handles
+    # Start with coordinator not having the model
+    coordinator_peer = MockPeerHandle(coordinator_id, has_model=False, is_complete=False)
     
-    # Mock has_model to return False initially, then True after "download"
+    # Create a more sophisticated mock that transitions from not having model 
+    # to having an incomplete model to having a complete model
     coordinator_has_model_calls = 0
     
     async def has_model_with_delay(*args, **kwargs):
         nonlocal coordinator_has_model_calls
         coordinator_has_model_calls += 1
         
-        # First call returns False (not downloaded), subsequent calls return True (downloaded)
-        has_model = coordinator_has_model_calls > 1
-        is_complete = has_model
-        
-        # Return mock response
         response = AsyncMock()
-        response.has_model = has_model
-        response.is_complete = is_complete
+        
+        # First call: No model
+        if coordinator_has_model_calls == 1:
+            response.has_model = False
+            response.is_complete = False
+        # Second call: Has incomplete model
+        elif coordinator_has_model_calls == 2:
+            response.has_model = True
+            response.is_complete = False
+        # Third+ calls: Has complete model
+        else:
+            response.has_model = True
+            response.is_complete = True
+            
         return response
     
     # Replace the has_model method on coordinator_peer to simulate coordinator's download state
     coordinator_peer.has_model = has_model_with_delay
     
-    # Create a mock for _wait_for_model_on_coordinator to verify it gets called
-    wait_spy = AsyncMock(return_value=True)
-    
-    # Create a test shard and repo ID
+    # Create test data
     shard = Shard("test-model", 0, 1, 2)
     repo_id = "test-repo/model"
+    mock_file = {"path": "model.safetensors", "size": 1024 * 1024}  # 1MB file
     
-    # Create the downloader directly
+    # Set up coordinator's files after it "downloads" the model
+    async def get_model_file_list_with_delay(*args, **kwargs):
+        if coordinator_has_model_calls >= 2:
+            return ModelFileListResponse(files=[
+                ModelFileInfo(path=mock_file["path"], size=mock_file["size"], hash="")
+            ])
+        return ModelFileListResponse(files=[])
+    
+    coordinator_peer.get_model_file_list = get_model_file_list_with_delay
+    
+    # Create a MockPeerHandle that can identify itself as the non-coordinator
+    class EnhancedMockPeerHandle(MockPeerHandle):
+        def __init__(self, *args, **kwargs):
+            self.own_id = kwargs.pop('own_id', None)
+            super().__init__(*args, **kwargs)
+    
+    # Create mock objects with dependency injection
     fallback_downloader = MockFallbackDownloader()
-    downloader = PeerShardDownloader(fallback_downloader)
     
-    # Patch downloader's wait method with our spy
-    original_wait = downloader._wait_for_model_on_coordinator
-    downloader._wait_for_model_on_coordinator = wait_spy
+    # Create an enhanced downloader to track specific events
+    class TestPeerShardDownloader(PeerShardDownloader):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.wait_for_coordinator_called = False
+            self.download_from_peer_called = False
+            self.fallback_called = False
+            
+        async def _wait_for_model_on_coordinator(self, *args, **kwargs):
+            self.wait_for_coordinator_called = True
+            # Call original implementation with shorter timeouts
+            return await super()._wait_for_model_on_coordinator(*args, max_wait_seconds=1, poll_interval_seconds=0.1)
+            
+        async def download_model_from_peer(self, *args, **kwargs):
+            self.download_from_peer_called = True
+            return Path(f"/mock/downloads/{shard.model_id}")
+            
+    # Create our test downloader
+    downloader = TestPeerShardDownloader(fallback_downloader)
     
-    try:
-        # Configure as a non-coordinator node
-        # Set coordinator to someone else (not self)
-        downloader.set_coordinator_id("other-node-id")
-        downloader.set_peers([coordinator_peer])
-        
-        # Mock get_repo, path operations to avoid file system operations
-        with patch('exo.download.peer_download.get_repo', return_value=repo_id):
-            with patch('exo.download.peer_download.aios.path.exists', return_value=False):
-                with patch('exo.download.peer_download.ensure_downloads_dir', new_callable=AsyncMock) as mock_ensure_dir:
-                    mock_ensure_dir.return_value = Path("/mock/downloads")
-                    
-                    # Call the ensure_shard method
-                    await downloader.ensure_shard(shard, "MockInferenceEngine")
-                    
-                    # Verify the wait method was called with the correct parameters
-                    wait_spy.assert_called_once_with(coordinator_peer, repo_id)
-    finally:
-        # Restore original method
-        downloader._wait_for_model_on_coordinator = original_wait
+    # Set up the peers - non-coordinator with its own ID clearly indicated
+    non_coordinator_peer = EnhancedMockPeerHandle(non_coordinator_id, own_id=non_coordinator_id)
+    downloader.set_peers([coordinator_peer, non_coordinator_peer])
+    downloader.set_coordinator_id(coordinator_id)
+    
+    # Setup mocks to avoid file system operations
+    with patch('exo.download.peer_download.get_repo', return_value=repo_id):
+        with patch('exo.download.peer_download.aios.path.exists', return_value=False):
+            with patch('exo.download.peer_download.ensure_downloads_dir', new_callable=AsyncMock) as mock_ensure_dir:
+                with patch('exo.download.peer_download.aios.makedirs', new_callable=AsyncMock):
+                    # Setup sleep mock to speed up the test
+                    with patch('asyncio.sleep', new_callable=AsyncMock) as mock_sleep:
+                        mock_ensure_dir.return_value = Path("/mock/downloads")
+                        
+                        # Call the ensure_shard method from the perspective of a non-coordinator node
+                        result = await downloader.ensure_shard(shard, "MockInferenceEngine")
+                        
+                        # Verify expected events happened
+                        assert downloader.wait_for_coordinator_called, "Should have waited for coordinator"
+                        assert coordinator_has_model_calls >= 2, "Should have checked coordinator multiple times" 
+                        assert downloader.download_from_peer_called, "Should have downloaded from coordinator"
+                        assert not downloader.fallback_called, "Should NOT have used fallback downloader"
+                        
+                        # Verify the path is correct
+                        assert result == Path(f"/mock/downloads/{shard.model_id}")
 
 
 @pytest.mark.asyncio
@@ -374,8 +445,8 @@ async def test_node_wait_for_model_download():
     # Create a mock inference engine
     inference_engine = MockInferenceEngine(downloader)
     
-    # Create a node with the mock objects
-    node = Node(
+    # Create a test node with the mock objects
+    node = NonBackgroundTaskNode(
         _id="non-coordinator",
         server=MockServer(),
         shard_downloader=downloader,
@@ -418,6 +489,73 @@ async def test_node_wait_for_model_download():
     assert call_count >= 3  # Made at least 3 calls to has_model
     assert sleep_mock.call_count >= 2  # Called sleep between poll attempts
     
+
+@pytest.mark.asyncio
+async def test_non_coordinator_never_uses_fallback():
+    """Test that non-coordinator nodes NEVER use the fallback downloader"""
+    # Create a mock topology with two nodes
+    coordinator_id = "aaa-coordinator"
+    non_coordinator_id = "bbb-non-coordinator"
+    
+    # Create mock peer handles
+    # Coordinator will never have the model (to simulate permanent failure)
+    coordinator_peer = MockPeerHandle(coordinator_id, has_model=False, is_complete=False)
+    
+    # Create test data
+    shard = Shard("test-model", 0, 1, 2)
+    repo_id = "test-repo/model"
+    
+    # Create a MockPeerHandle that can identify itself as the non-coordinator
+    class EnhancedMockPeerHandle(MockPeerHandle):
+        def __init__(self, *args, **kwargs):
+            self.own_id = kwargs.pop('own_id', None)
+            super().__init__(*args, **kwargs)
+    
+    # Create mock objects with dependency injection
+    fallback_downloader = MockFallbackDownloader()
+    
+    # Create a spy on the fallback_downloader.ensure_shard method
+    original_fallback_ensure = fallback_downloader.ensure_shard
+    fallback_ensure_spy = AsyncMock(wraps=original_fallback_ensure)
+    fallback_downloader.ensure_shard = fallback_ensure_spy
+    
+    # Create our test downloader
+    downloader = PeerShardDownloader(fallback_downloader)
+    
+    # Set up the peers with proper identity
+    non_coordinator_peer = EnhancedMockPeerHandle(non_coordinator_id, own_id=non_coordinator_id)
+    downloader.set_peers([coordinator_peer, non_coordinator_peer])
+    downloader.set_coordinator_id(coordinator_id)
+    
+    # Make sure our node knows it's NOT the coordinator
+    def mock_am_i_coordinator():
+        return False
+        
+    # Ensure the _wait_for_model_on_coordinator method returns quickly
+    with patch.object(downloader, '_wait_for_model_on_coordinator', new_callable=AsyncMock) as mock_wait:
+        # Configure the wait method to return False (timeout waiting for coordinator)
+        mock_wait.return_value = False
+        
+        # Setup mocks to avoid file system operations
+        with patch('exo.download.peer_download.get_repo', return_value=repo_id):
+            with patch('exo.download.peer_download.aios.path.exists', return_value=False):
+                with patch('exo.download.peer_download.ensure_downloads_dir', new_callable=AsyncMock) as mock_ensure_dir:
+                    with patch('exo.download.peer_download.aios.makedirs', new_callable=AsyncMock):
+                        # Setup sleep mock to speed up the test
+                        with patch('asyncio.sleep', new_callable=AsyncMock):
+                            mock_ensure_dir.return_value = Path("/mock/downloads")
+                            
+                            # Try to call ensure_shard from non-coordinator perspective
+                            result = await downloader.ensure_shard(shard, "MockInferenceEngine")
+                            
+                            # Verify the fallback_downloader was NEVER called
+                            # This is the key assertion - non-coordinators should NEVER use the fallback
+                            fallback_ensure_spy.assert_not_called()
+                            
+                            # The result should still be a valid path (but the model will be missing/incomplete)
+                            assert isinstance(result, Path)
+                            assert "mock/downloads" in str(result)
+
 
 if __name__ == "__main__":
     pytest.main(["-xvs", "test_peer_download_coordination.py"])

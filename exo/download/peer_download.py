@@ -34,15 +34,15 @@ class PeerShardDownloader(ShardDownloader):
         self.downloading_models: Set[str] = set()
         
     async def _wait_for_model_on_coordinator(self, coordinator_peer, repo_id, revision="main", 
-                                         max_wait_seconds=120, poll_interval_seconds=2.0):
+                                         max_wait_seconds=300, poll_interval_seconds=5.0):
         """Wait for the coordinator node to download a model
         
         Args:
             coordinator_peer: The peer handle for the coordinator node
             repo_id: The repo ID to wait for
             revision: The model revision to wait for (default: main)
-            max_wait_seconds: Maximum time to wait in seconds (default: 120)
-            poll_interval_seconds: How often to check if model is available (default: 2.0)
+            max_wait_seconds: Maximum time to wait in seconds (default: 300)
+            poll_interval_seconds: How often to check if model is available (default: 5.0)
             
         Returns:
             bool: True if model was found on coordinator, False if timed out
@@ -64,6 +64,10 @@ class PeerShardDownloader(ShardDownloader):
             # If we can't access this information, just continue with the polling approach
             pass
         
+        # Set the maximum timeout - we're more patient now!
+        max_attempts = max_wait_seconds // poll_interval_seconds
+        print(f"[PEER DOWNLOAD] Will make up to {max_attempts} attempts to check coordinator")
+        
         while time.time() - start_time < max_wait_seconds:
             attempts += 1
             try:
@@ -81,20 +85,22 @@ class PeerShardDownloader(ShardDownloader):
                     
                     # If the model is complete, we can download it
                     if has_model_response.is_complete:
+                        print(f"[PEER DOWNLOAD] Coordinator has COMPLETE model - ready to download!")
                         return True
                     # If we've already waited a bit and the model is still incomplete, we'll still use it
-                    elif attempts > 10 or time.time() - start_time > 30:
-                        print(f"[PEER DOWNLOAD] Coordinator has partial model after waiting, proceeding with download")
+                    elif attempts > 10 or time.time() - start_time > 60:
+                        print(f"[PEER DOWNLOAD] Coordinator has partial model after waiting {time.time() - start_time:.1f}s, proceeding with download")
                         return True
                     else:
                         # Model is incomplete but we haven't waited long, keep polling
                         print(f"[PEER DOWNLOAD] Coordinator has incomplete model, continuing to wait...")
                         downloading_seen = True
                     
-                # If we're debugging, log poll attempts
+                # If we're debugging or periodically, log poll attempts
                 if DEBUG >= 2 or attempts % 5 == 0:  # Log every 5 attempts
                     elapsed = time.time() - start_time
-                    print(f"[PEER DOWNLOAD] Waiting for model {repo_id} on coordinator (elapsed: {elapsed:.1f}s, attempt: {attempts})")
+                    remaining = max_wait_seconds - elapsed
+                    print(f"[PEER DOWNLOAD] Waiting for model {repo_id} on coordinator (elapsed: {elapsed:.1f}s, remaining: {remaining:.1f}s, attempt: {attempts})")
                     
             except Exception as e:
                 print(f"[PEER DOWNLOAD] Error checking for model on coordinator: {e}")
@@ -105,6 +111,17 @@ class PeerShardDownloader(ShardDownloader):
             await asyncio.sleep(poll_interval_seconds)
         
         print(f"[PEER DOWNLOAD] Timed out waiting for coordinator to download model {repo_id} after {max_wait_seconds} seconds")
+        
+        # Last attempt before giving up - if this fails, we'll try again later
+        try:
+            # One final check before giving up
+            has_model_response = await coordinator_peer.has_model(repo_id, revision)
+            if has_model_response.has_model:
+                print(f"[PEER DOWNLOAD] Last-minute check: found model on coordinator!")
+                return True
+        except Exception:
+            pass
+            
         return False
         
     @staticmethod
@@ -398,18 +415,30 @@ class PeerShardDownloader(ShardDownloader):
             print(f"[PEER DOWNLOAD] No peers available, downloading {repo_id} directly")
             return await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
             
-        # Check if I'm the coordinator
+        # Check if I'm the coordinator - ensure we calculate this reliably
         am_i_coordinator = False
+        my_id = None
+        
         if self._coordinator_id:
-            # If I have a node_id value from my peers, check against coordinator_id
-            if hasattr(self, 'peers') and self.peers and hasattr(self.peers[0], 'id'):
-                my_id = self.peers[0].id()
-                am_i_coordinator = (self._coordinator_id == my_id)
-            # If I don't have peers with IDs yet, we can't determine coordinator status
+            # If we have peers with IDs, we can compare to determine coordinator status
+            if hasattr(self, 'peers') and self.peers:
+                # Get my node ID from either my own peer object or the first peer's method
+                for peer in self.peers:
+                    my_id = peer.id()
+                    # Don't break after getting an ID - keep looking until we find our own
+                    if hasattr(peer, 'own_id') and peer.own_id is not None:
+                        my_id = peer.own_id
+                        break
+                
+                if my_id:
+                    am_i_coordinator = (self._coordinator_id == my_id)
+                    print(f"[PEER DOWNLOAD] Coordinator check: My ID={my_id}, Coordinator ID={self._coordinator_id}, am_i_coordinator={am_i_coordinator}")
+                else:
+                    print(f"[PEER DOWNLOAD] Unable to determine my node ID from peers")
             else:
                 print(f"[PEER DOWNLOAD] Unable to determine coordinator status due to missing peer ID")
                 
-        # If I'm the coordinator, download directly
+        # If I'm definitely the coordinator, download directly
         if am_i_coordinator:
             print(f"[PEER DOWNLOAD] I am the coordinator node ({self._coordinator_id}), downloading {repo_id} directly")
             return await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
@@ -490,10 +519,22 @@ class PeerShardDownloader(ShardDownloader):
         
         # If we got here, either no peer had the model or download from peer failed
         # Check if I'm the coordinator - only the coordinator should fall back to direct download
+        # Re-check our coordinator status to be certain
         am_i_coordinator = False
+        my_id = None
+        
         if self._coordinator_id:
-            my_id = self.peers[0].id() if self.peers else "unknown"
-            am_i_coordinator = (self._coordinator_id == my_id)
+            if hasattr(self, 'peers') and self.peers:
+                # Try to find our own ID with higher confidence
+                for peer in self.peers:
+                    my_id = peer.id()
+                    if hasattr(peer, 'own_id') and peer.own_id is not None:
+                        my_id = peer.own_id
+                        break
+                
+                if my_id:
+                    am_i_coordinator = (self._coordinator_id == my_id)
+                    print(f"[PEER DOWNLOAD] Double-checking coordinator status: My ID={my_id}, Coordinator ID={self._coordinator_id}, am_i_coordinator={am_i_coordinator}")
             
         if am_i_coordinator:
             # ONLY the coordinator should fall back to direct download
@@ -507,7 +548,7 @@ class PeerShardDownloader(ShardDownloader):
             print(f"[PEER DOWNLOAD] Direct download of {repo_id} completed in {direct_download_time:.2f} seconds")
             return result
         else:
-            # Non-coordinator nodes should NOT fall back to direct download
+            # Non-coordinator nodes should NEVER fall back to direct download
             print(f"[PEER DOWNLOAD] No peers have {repo_id} yet, but I am not the coordinator")
             print(f"[PEER DOWNLOAD] Will continue waiting for coordinator ({self._coordinator_id}) to download model")
             

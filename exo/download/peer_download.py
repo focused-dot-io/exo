@@ -365,13 +365,33 @@ class PeerShardDownloader(ShardDownloader):
             filtered_file_list = list(self.filter_repo_objects(file_list, allow_patterns=allow_patterns, key=lambda x: x["path"]))
             
             all_files_exist = True
+            missing_files = []
             for file in filtered_file_list:
                 if not await aios.path.exists(target_dir/file["path"]):
                     all_files_exist = False
+                    missing_files.append(file["path"])
+            
+            # Extra check for weight files (critical for inference)
+            has_weight_files = False
+            for root, dirs, files in os.walk(target_dir):
+                for file in files:
+                    if (file.endswith(".safetensors") or file.endswith(".bin") or 
+                        file.endswith(".pt") or file.endswith(".gguf")):
+                        has_weight_files = True
+                        break
+                if has_weight_files:
                     break
-                    
-            if all_files_exist:
+            
+            # Only return if we have all files AND weight files
+            if all_files_exist and has_weight_files:
+                print(f"[PEER DOWNLOAD] Model {repo_id} is already downloaded and complete")
                 return target_dir
+            elif not has_weight_files:
+                print(f"[PEER DOWNLOAD] WARNING: Model {repo_id} is missing weight files (.safetensors)")
+                # Continue to get proper model from coordinator
+            elif not all_files_exist:
+                print(f"[PEER DOWNLOAD] Model {repo_id} is partially downloaded (missing {len(missing_files)} files)")
+                # Continue to get complete model
         
         # If I have no peers, download directly
         if not self.peers:

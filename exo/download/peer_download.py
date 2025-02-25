@@ -50,6 +50,15 @@ class PeerShardDownloader(ShardDownloader):
         print(f"[PEER DOWNLOAD] Waiting for coordinator {coordinator_peer.id()} to download model {repo_id}")
         print(f"[PEER DOWNLOAD] Will wait up to {max_wait_seconds} seconds with {poll_interval_seconds}s polling interval")
         
+        # Print out debug info about gRPC connection
+        try:
+            is_connected = await coordinator_peer.is_connected()
+            print(f"[PEER DOWNLOAD] Connection to coordinator: {'CONNECTED' if is_connected else 'NOT CONNECTED'}")
+        except Exception as e:
+            print(f"[PEER DOWNLOAD] Error checking connection to coordinator: {e}")
+            if DEBUG >= 2:
+                traceback.print_exc()
+        
         start_time = time.time()
         attempts = 0
         downloading_seen = False
@@ -336,6 +345,22 @@ class PeerShardDownloader(ShardDownloader):
             # If we can't get the remote ID, that's fine
             pass
             
+        # Check if peer is connected before trying to get file list
+        try:
+            is_connected = await peer.is_connected()
+            if not is_connected:
+                print(f"[PEER DOWNLOAD] WARNING: Peer {peer.id()} is not connected! Attempting to connect...")
+                try:
+                    await peer.connect()
+                    print(f"[PEER DOWNLOAD] Successfully connected to peer {peer.id()}")
+                except Exception as e:
+                    print(f"[PEER DOWNLOAD] Failed to connect to peer {peer.id()}: {e}")
+                    if DEBUG >= 2:
+                        traceback.print_exc()
+        except Exception as e:
+            print(f"[PEER DOWNLOAD] Error checking connection status: {e}")
+            
+        # Now get the file list
         file_list_response = await peer.get_model_file_list(repo_id, revision, allow_patterns)
         
         if not file_list_response.files:

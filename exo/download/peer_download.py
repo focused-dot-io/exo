@@ -469,16 +469,47 @@ class PeerShardDownloader(ShardDownloader):
                     self.downloading_models.remove(repo_id)
         
         # If we got here, either no peer had the model or download from peer failed
-        # Fall back to direct download
-        print(f"[PEER DOWNLOAD] No peers have {repo_id} or peer download failed")
-        print(f"[PEER DOWNLOAD] Falling back to direct download from HuggingFace")
+        # Check if I'm the coordinator - only the coordinator should fall back to direct download
+        am_i_coordinator = False
+        if self._coordinator_id:
+            my_id = self.peers[0].id() if self.peers else "unknown"
+            am_i_coordinator = (self._coordinator_id == my_id)
             
-        direct_download_start = time.time()
-        result = await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
-        direct_download_time = time.time() - direct_download_start
-        
-        print(f"[PEER DOWNLOAD] Direct download of {repo_id} completed in {direct_download_time:.2f} seconds")
-        return result
+        if am_i_coordinator:
+            # ONLY the coordinator should fall back to direct download
+            print(f"[PEER DOWNLOAD] No peers have {repo_id} or peer download failed")
+            print(f"[PEER DOWNLOAD] I am the coordinator, falling back to direct download from HuggingFace")
+                
+            direct_download_start = time.time()
+            result = await self.fallback_downloader.ensure_shard(shard, inference_engine_name)
+            direct_download_time = time.time() - direct_download_start
+            
+            print(f"[PEER DOWNLOAD] Direct download of {repo_id} completed in {direct_download_time:.2f} seconds")
+            return result
+        else:
+            # Non-coordinator nodes should NOT fall back to direct download
+            print(f"[PEER DOWNLOAD] No peers have {repo_id} yet, but I am not the coordinator")
+            print(f"[PEER DOWNLOAD] Will continue waiting for coordinator ({self._coordinator_id}) to download model")
+            
+            # If we have a coordinator peer, wait for it
+            if coordinator_peer:
+                print(f"[PEER DOWNLOAD] Waiting up to 300 seconds for coordinator to download model...")
+                wait_success = await self._wait_for_model_on_coordinator(
+                    coordinator_peer, repo_id, max_wait_seconds=300, poll_interval_seconds=5.0
+                )
+                
+                if wait_success:
+                    print(f"[PEER DOWNLOAD] Coordinator now has model {repo_id}, downloading from coordinator")
+                    return await self.download_model_from_peer(
+                        coordinator_peer, shard, inference_engine_name, self.on_progress
+                    )
+                else:
+                    print(f"[PEER DOWNLOAD] ERROR: Could not download {repo_id} - coordinator did not download it")
+                    # Return empty path to indicate failure
+                    return None
+            else:
+                print(f"[PEER DOWNLOAD] ERROR: Could not find coordinator peer {self._coordinator_id}")
+                return None
     
     async def get_shard_download_status(self, inference_engine_name: str) -> AsyncIterator[tuple[Path, RepoProgressEvent]]:
         """Get the download status of all shards"""
